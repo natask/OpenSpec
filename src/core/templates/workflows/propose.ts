@@ -27,12 +27,13 @@ When ready to implement, run /opsx:apply
 
 1. **If no clear input provided, ask what they want to build**
 
-   Use the **AskUserQuestion tool** (open-ended, no preset options) to ask:
+   Ask the user directly in your response text:
    > "What change do you want to work on? Describe what you want to build or fix."
 
    From their description, derive a kebab-case name (e.g., "add user authentication" → \`add-user-auth\`).
 
    **IMPORTANT**: Do NOT proceed without understanding what the user wants to build.
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just ask in plain text and wait for the user's reply.
 
 2. **Create the change directory**
    \`\`\`bash
@@ -77,7 +78,7 @@ When ready to implement, run /opsx:apply
       - Stop when all \`applyRequires\` artifacts are done
 
    c. **If an artifact requires user input** (unclear context):
-      - Use **AskUserQuestion tool** to clarify
+      - Ask the user for clarification in plain text
       - Then continue with creation
 
 5. **Show final status**
@@ -138,12 +139,13 @@ When ready to implement, run /opsx:apply
 
 1. **If no input provided, ask what they want to build**
 
-   Use the **AskUserQuestion tool** (open-ended, no preset options) to ask:
+   Ask the user directly in your response text:
    > "What change do you want to work on? Describe what you want to build or fix."
 
    From their description, derive a kebab-case name (e.g., "add user authentication" → \`add-user-auth\`).
 
    **IMPORTANT**: Do NOT proceed without understanding what the user wants to build.
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just ask in plain text and wait for the user's reply.
 
 2. **Create the change directory**
    \`\`\`bash
@@ -188,7 +190,7 @@ When ready to implement, run /opsx:apply
       - Stop when all \`applyRequires\` artifacts are done
 
    c. **If an artifact requires user input** (unclear context):
-      - Use **AskUserQuestion tool** to clarify
+      - Ask the user for clarification in plain text
       - Then continue with creation
 
 5. **Show final status**

@@ -18,12 +18,13 @@ export function getNewChangeSkillTemplate(): SkillTemplate {
 
 1. **If no clear input provided, ask what they want to build**
 
-   Use the **AskUserQuestion tool** (open-ended, no preset options) to ask:
+   Ask the user directly in your response text:
    > "What change do you want to work on? Describe what you want to build or fix."
 
    From their description, derive a kebab-case name (e.g., "add user authentication" → \`add-user-auth\`).
 
    **IMPORTANT**: Do NOT proceed without understanding what the user wants to build.
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just ask in plain text and wait for the user's reply.
 
 2. **Determine the workflow schema**
 
@@ -93,12 +94,13 @@ export function getOpsxNewCommandTemplate(): CommandTemplate {
 
 1. **If no input provided, ask what they want to build**
 
-   Use the **AskUserQuestion tool** (open-ended, no preset options) to ask:
+   Ask the user directly in your response text:
    > "What change do you want to work on? Describe what you want to build or fix."
 
    From their description, derive a kebab-case name (e.g., "add user authentication" → \`add-user-auth\`).
 
    **IMPORTANT**: Do NOT proceed without understanding what the user wants to build.
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just ask in plain text and wait for the user's reply.
 
 2. **Determine the workflow schema**
 

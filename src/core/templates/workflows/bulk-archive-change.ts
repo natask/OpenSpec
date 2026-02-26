@@ -26,12 +26,13 @@ This skill allows you to batch-archive changes, handling spec conflicts intellig
 
 2. **Prompt for change selection**
 
-   Use **AskUserQuestion tool** with multi-select to let user choose changes:
+   List all changes in your response text for the user to choose from:
    - Show each change with its schema
    - Include an option for "All changes"
    - Allow any number of selections (1+ works, 2+ is the typical use case)
 
    **IMPORTANT**: Do NOT auto-select. Always let the user choose.
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just list options in plain text and wait for the user's reply.
 
 3. **Batch validation - gather status for all selected changes**
 
@@ -107,7 +108,7 @@ This skill allows you to batch-archive changes, handling spec conflicts intellig
 
 7. **Confirm batch operation**
 
-   Use **AskUserQuestion tool** with a single confirmation:
+   Ask the user for confirmation in plain text:
 
    - "Archive N changes?" with options based on status
    - Options might include:
@@ -273,12 +274,13 @@ This skill allows you to batch-archive changes, handling spec conflicts intellig
 
 2. **Prompt for change selection**
 
-   Use **AskUserQuestion tool** with multi-select to let user choose changes:
+   List all changes in your response text for the user to choose from:
    - Show each change with its schema
    - Include an option for "All changes"
    - Allow any number of selections (1+ works, 2+ is the typical use case)
 
    **IMPORTANT**: Do NOT auto-select. Always let the user choose.
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just list options in plain text and wait for the user's reply.
 
 3. **Batch validation - gather status for all selected changes**
 
@@ -354,7 +356,7 @@ This skill allows you to batch-archive changes, handling spec conflicts intellig
 
 7. **Confirm batch operation**
 
-   Use **AskUserQuestion tool** with a single confirmation:
+   Ask the user for confirmation in plain text:
 
    - "Archive N changes?" with options based on status
    - Options might include:

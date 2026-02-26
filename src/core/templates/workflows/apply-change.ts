@@ -21,9 +21,11 @@ export function getApplyChangeSkillTemplate(): SkillTemplate {
    If a name is provided, use it. Otherwise:
    - Infer from conversation context if the user mentioned a change
    - Auto-select if only one active change exists
-   - If ambiguous, run \`openspec list --json\` to get available changes and use the **AskUserQuestion tool** to let the user select
+   - If ambiguous, run \`openspec list --json\` to get available changes and list them in your response text for the user to choose from
 
    Always announce: "Using change: <name>" and how to override (e.g., \`/opsx:apply <other>\`).
+
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just list options in plain text and wait for the user's reply.
 
 2. **Check status to understand the schema**
    \`\`\`bash
@@ -178,9 +180,11 @@ export function getOpsxApplyCommandTemplate(): CommandTemplate {
    If a name is provided, use it. Otherwise:
    - Infer from conversation context if the user mentioned a change
    - Auto-select if only one active change exists
-   - If ambiguous, run \`openspec list --json\` to get available changes and use the **AskUserQuestion tool** to let the user select
+   - If ambiguous, run \`openspec list --json\` to get available changes and list them in your response text for the user to choose from
 
    Always announce: "Using change: <name>" and how to override (e.g., \`/opsx:apply <other>\`).
+
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just list options in plain text and wait for the user's reply.
 
 2. **Check status to understand the schema**
    \`\`\`bash

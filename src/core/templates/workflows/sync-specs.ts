@@ -20,11 +20,12 @@ This is an **agent-driven** operation - you will read delta specs and directly e
 
 1. **If no change name provided, prompt for selection**
 
-   Run \`openspec list --json\` to get available changes. Use the **AskUserQuestion tool** to let the user select.
+   Run \`openspec list --json\` to get available changes. List them in your response text for the user to choose from.
 
    Show changes that have delta specs (under \`specs/\` directory).
 
    **IMPORTANT**: Do NOT guess or auto-select a change. Always let the user choose.
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just list options in plain text and wait for the user's reply.
 
 2. **Find delta specs**
 
@@ -159,11 +160,12 @@ This is an **agent-driven** operation - you will read delta specs and directly e
 
 1. **If no change name provided, prompt for selection**
 
-   Run \`openspec list --json\` to get available changes. Use the **AskUserQuestion tool** to let the user select.
+   Run \`openspec list --json\` to get available changes. List them in your response text for the user to choose from.
 
    Show changes that have delta specs (under \`specs/\` directory).
 
    **IMPORTANT**: Do NOT guess or auto-select a change. Always let the user choose.
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just list options in plain text and wait for the user's reply.
 
 2. **Find delta specs**
 

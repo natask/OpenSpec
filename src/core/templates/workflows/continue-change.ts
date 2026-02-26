@@ -18,7 +18,7 @@ export function getContinueChangeSkillTemplate(): SkillTemplate {
 
 1. **If no change name provided, prompt for selection**
 
-   Run \`openspec list --json\` to get available changes sorted by most recently modified. Then use the **AskUserQuestion tool** to let the user select which change to work on.
+   Run \`openspec list --json\` to get available changes sorted by most recently modified. Then list them in your response text for the user to choose from.
 
    Present the top 3-4 most recently modified changes as options, showing:
    - Change name
@@ -29,6 +29,7 @@ export function getContinueChangeSkillTemplate(): SkillTemplate {
    Mark the most recently modified change as "(Recommended)" since it's likely what the user wants to continue.
 
    **IMPORTANT**: Do NOT guess or auto-select a change. Always let the user choose.
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just list options in plain text and wait for the user's reply.
 
 2. **Check current status**
    \`\`\`bash
@@ -137,7 +138,7 @@ export function getOpsxContinueCommandTemplate(): CommandTemplate {
 
 1. **If no change name provided, prompt for selection**
 
-   Run \`openspec list --json\` to get available changes sorted by most recently modified. Then use the **AskUserQuestion tool** to let the user select which change to work on.
+   Run \`openspec list --json\` to get available changes sorted by most recently modified. Then list them in your response text for the user to choose from.
 
    Present the top 3-4 most recently modified changes as options, showing:
    - Change name
@@ -148,6 +149,7 @@ export function getOpsxContinueCommandTemplate(): CommandTemplate {
    Mark the most recently modified change as "(Recommended)" since it's likely what the user wants to continue.
 
    **IMPORTANT**: Do NOT guess or auto-select a change. Always let the user choose.
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just list options in plain text and wait for the user's reply.
 
 2. **Check current status**
    \`\`\`bash

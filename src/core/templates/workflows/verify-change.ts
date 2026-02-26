@@ -18,13 +18,14 @@ export function getVerifyChangeSkillTemplate(): SkillTemplate {
 
 1. **If no change name provided, prompt for selection**
 
-   Run \`openspec list --json\` to get available changes. Use the **AskUserQuestion tool** to let the user select.
+   Run \`openspec list --json\` to get available changes. List them in your response text for the user to choose from.
 
    Show changes that have implementation tasks (tasks artifact exists).
    Include the schema used for each change if available.
    Mark changes with incomplete tasks as "(In Progress)".
 
    **IMPORTANT**: Do NOT guess or auto-select a change. Always let the user choose.
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just list options in plain text and wait for the user's reply.
 
 2. **Check status to understand the schema**
    \`\`\`bash
@@ -187,13 +188,14 @@ export function getOpsxVerifyCommandTemplate(): CommandTemplate {
 
 1. **If no change name provided, prompt for selection**
 
-   Run \`openspec list --json\` to get available changes. Use the **AskUserQuestion tool** to let the user select.
+   Run \`openspec list --json\` to get available changes. List them in your response text for the user to choose from.
 
    Show changes that have implementation tasks (tasks artifact exists).
    Include the schema used for each change if available.
    Mark changes with incomplete tasks as "(In Progress)".
 
    **IMPORTANT**: Do NOT guess or auto-select a change. Always let the user choose.
+   **IMPORTANT**: Do NOT use the AskUserQuestion tool. Just list options in plain text and wait for the user's reply.
 
 2. **Check status to understand the schema**
    \`\`\`bash
