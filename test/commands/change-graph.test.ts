@@ -3,7 +3,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runCLI } from '../helpers/run-cli.js';
 
-describe('change graph command', () => {
+describe('change sequencing commands', () => {
   const testDir = path.join(process.cwd(), 'test-change-graph-tmp');
   const changesDir = path.join(testDir, 'openspec', 'changes');
 
@@ -63,6 +63,58 @@ describe('change graph command', () => {
     );
     expect(result.stderr).toContain(
       'Missing dependency target "missing-change" referenced by change "alpha".'
+    );
+  });
+
+  it('suggests only unblocked active changes in recommended order', async () => {
+    await writeChange('gamma', ['alpha']);
+    await writeChange('beta');
+    await writeChange('current', ['completed-change']);
+    await writeChange('alpha');
+    const archivedDir = path.join(changesDir, 'archive', '2026-08-08-completed-change');
+    await fs.mkdir(archivedDir, { recursive: true });
+    await fs.writeFile(path.join(archivedDir, 'proposal.md'), '# completed-change\n');
+
+    const result = await runCLI(['change', 'next'], { cwd: testDir });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe([
+      'Recommended next changes:',
+      '1. alpha',
+      '2. beta',
+      '3. current',
+    ].join('\n'));
+    expect(result.stdout).not.toContain('gamma');
+  });
+
+  it('preserves advisory warnings while suggesting unblocked changes', async () => {
+    await writeChange('alpha', [], ['shared-area'], ['missing-marker']);
+    await writeChange('bravo', [], ['shared-area']);
+
+    const result = await runCLI(['change', 'next'], { cwd: testDir });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Recommended next changes:');
+    expect(result.stderr).toContain(
+      'Active changes "alpha", "bravo" all touch "shared-area".'
+    );
+    expect(result.stderr).toContain(
+      'No active or archived change provides required marker "missing-marker" for change "alpha".'
+    );
+  });
+
+  it('fails with graph blockers before suggesting changes', async () => {
+    await writeChange('alpha', ['bravo']);
+    await writeChange('bravo', ['alpha']);
+    await writeChange('independent');
+
+    const result = await runCLI(['change', 'next'], { cwd: testDir });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).not.toContain('Recommended next changes:');
+    expect(result.stdout).not.toContain('independent');
+    expect(result.stderr).toContain(
+      'Dependency cycle detected: alpha -> bravo -> alpha.'
     );
   });
 

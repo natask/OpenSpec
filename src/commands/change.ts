@@ -14,6 +14,7 @@ import {
   formatMissingDependency,
   formatUnmatchedRequirement,
   getDependencyOrder,
+  getUnblockedChanges,
   type ActiveChangeValidationAnalysis,
 } from '../core/validation/change-dependencies.js';
 import type { ValidationIssue } from '../core/validation/types.js';
@@ -259,15 +260,7 @@ export class ChangeCommand {
       return;
     }
 
-    const issues = this.getGraphIssues(analysis);
-    for (const issue of issues) {
-      const prefix = issue.level === 'ERROR' ? '✗' : '⚠';
-      console.error(`${prefix} [${issue.level}] ${issue.path}: ${issue.message}`);
-    }
-    if (issues.some(issue => issue.level === 'ERROR')) {
-      process.exitCode = 1;
-      return;
-    }
+    if (!this.printGraphIssues(analysis)) return;
 
     const order = getDependencyOrder(analysis.activeDependencies);
     console.log('Recommended dependency order:');
@@ -278,6 +271,24 @@ export class ChangeCommand {
         ? ` (depends on: ${dependencies.join(', ')})`
         : '';
       console.log(`${index + 1}. ${changeId}${relationship}`);
+    });
+  }
+
+  async next(): Promise<void> {
+    const changesPath = path.join(process.cwd(), 'openspec', 'changes');
+    const analysis = await analyzeActiveChangeDependencies(path.join(changesPath, '.next'));
+
+    if (analysis.activeDependencies.size === 0) {
+      console.log('No active changes found.');
+      return;
+    }
+
+    if (!this.printGraphIssues(analysis)) return;
+
+    const unblockedChanges = getUnblockedChanges(analysis.activeDependencies);
+    console.log('Recommended next changes:');
+    unblockedChanges.forEach((changeId, index) => {
+      console.log(`${index + 1}. ${changeId}`);
     });
   }
 
@@ -359,6 +370,19 @@ export class ChangeCommand {
       }
     }
     return issues;
+  }
+
+  private printGraphIssues(analysis: ActiveChangeValidationAnalysis): boolean {
+    const issues = this.getGraphIssues(analysis);
+    for (const issue of issues) {
+      const prefix = issue.level === 'ERROR' ? '✗' : '⚠';
+      console.error(`${prefix} [${issue.level}] ${issue.path}: ${issue.message}`);
+    }
+    if (issues.some(issue => issue.level === 'ERROR')) {
+      process.exitCode = 1;
+      return false;
+    }
+    return true;
   }
 
   private printNextSteps(): void {

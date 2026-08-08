@@ -145,6 +145,13 @@ export function getDependencyOrder(graph: ChangeDependencyGraph): string[] {
   return order;
 }
 
+export function getUnblockedChanges(graph: ChangeDependencyGraph): string[] {
+  const activeChangeIds = new Set(graph.keys());
+  return getDependencyOrder(graph).filter(changeId =>
+    (graph.get(changeId) ?? []).every(dependency => !activeChangeIds.has(dependency))
+  );
+}
+
 interface CyclicComponent {
   members: readonly string[];
   cycle: DependencyCycle;

@@ -278,6 +278,19 @@ changeCmd
     }
   });
 
+changeCmd
+  .command('next')
+  .description('Suggest unblocked active changes in recommended order')
+  .action(async () => {
+    try {
+      const changeCommand = new ChangeCommand();
+      await changeCommand.next();
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
 program
   .command('archive [change-name]')
   .description('Archive a completed change and update main specs')
