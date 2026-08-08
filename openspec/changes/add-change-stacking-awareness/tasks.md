@@ -1,8 +1,8 @@
 ## 1. Metadata Model
 
-- [ ] 1.1 Add optional stack metadata fields (`dependsOn`, `provides`, `requires`, `touches`, `parent`) to change metadata schema
-- [ ] 1.2 Keep metadata backward compatible for existing changes without new fields
-- [ ] 1.3 Add tests for valid/invalid metadata and schema evolution behavior
+- [x] 1.1 Add optional stack metadata fields (`dependsOn`, `provides`, `requires`, `touches`, `parent`) to change metadata schema
+- [x] 1.2 Keep metadata backward compatible for existing changes without new fields
+- [x] 1.3 Add tests for valid/invalid metadata and schema evolution behavior
 
 ## 2. Stack-Aware Validation
 

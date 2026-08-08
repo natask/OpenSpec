@@ -35,6 +35,10 @@ export type Artifact = z.infer<typeof ArtifactSchema>;
 export type ApplyPhase = z.infer<typeof ApplyPhaseSchema>;
 export type SchemaYaml = z.infer<typeof SchemaYamlSchema>;
 
+const ChangeMetadataIdentifierSchema = z.string().min(1, {
+  message: 'stack metadata values must be non-empty strings',
+});
+
 // Per-change metadata schema
 // Note: schema field is validated at parse time against available schemas
 // using a lazy import to avoid circular dependencies
@@ -49,6 +53,14 @@ export const ChangeMetadataSchema = z.object({
       message: 'created must be YYYY-MM-DD format',
     })
     .optional(),
+
+  // Optional stack metadata. These fields intentionally remain absent when
+  // omitted so existing metadata files keep their current parsed shape.
+  dependsOn: z.array(ChangeMetadataIdentifierSchema).optional(),
+  provides: z.array(ChangeMetadataIdentifierSchema).optional(),
+  requires: z.array(ChangeMetadataIdentifierSchema).optional(),
+  touches: z.array(ChangeMetadataIdentifierSchema).optional(),
+  parent: ChangeMetadataIdentifierSchema.optional(),
 });
 
 export type ChangeMetadata = z.infer<typeof ChangeMetadataSchema>;
@@ -62,4 +74,3 @@ export type CompletedSet = Set<string>;
 export interface BlockedArtifacts {
   [artifactId: string]: string[];
 }
-

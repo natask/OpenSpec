@@ -36,6 +36,52 @@ describe('ChangeMetadataSchema', () => {
         expect(result.data.created).toBeUndefined();
       }
     });
+
+    it('should accept and expose optional stack metadata', () => {
+      const metadata = {
+        schema: 'spec-driven',
+        dependsOn: ['add-auth-contract', 'add-user-model'],
+        provides: ['authenticated-session'],
+        requires: ['user-record'],
+        touches: ['auth', 'user-spec'],
+        parent: 'modernize-auth',
+      };
+
+      const result = ChangeMetadataSchema.safeParse(metadata);
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).toEqual(metadata);
+      }
+    });
+
+    it('should accept empty stack metadata arrays', () => {
+      const result = ChangeMetadataSchema.safeParse({
+        schema: 'spec-driven',
+        dependsOn: [],
+        provides: [],
+        requires: [],
+        touches: [],
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it('should preserve the legacy parsed shape when stack metadata is absent', () => {
+      const metadata = {
+        schema: 'spec-driven',
+        created: '2025-01-05',
+      };
+
+      const result = ChangeMetadataSchema.parse(metadata);
+
+      expect(result).toEqual(metadata);
+      expect('dependsOn' in result).toBe(false);
+      expect('provides' in result).toBe(false);
+      expect('requires' in result).toBe(false);
+      expect('touches' in result).toBe(false);
+      expect('parent' in result).toBe(false);
+    });
   });
 
   describe('invalid metadata', () => {
@@ -68,6 +114,39 @@ describe('ChangeMetadataSchema', () => {
       });
       expect(result.success).toBe(false);
     });
+
+    it.each(['dependsOn', 'provides', 'requires', 'touches'] as const)(
+      'should reject a non-array %s value',
+      (field) => {
+        const result = ChangeMetadataSchema.safeParse({
+          schema: 'spec-driven',
+          [field]: 'not-an-array',
+        });
+
+        expect(result.success).toBe(false);
+      }
+    );
+
+    it.each(['dependsOn', 'provides', 'requires', 'touches'] as const)(
+      'should reject non-string or empty entries in %s',
+      (field) => {
+        expect(
+          ChangeMetadataSchema.safeParse({ schema: 'spec-driven', [field]: [42] }).success
+        ).toBe(false);
+        expect(
+          ChangeMetadataSchema.safeParse({ schema: 'spec-driven', [field]: [''] }).success
+        ).toBe(false);
+      }
+    );
+
+    it('should reject a non-string or empty parent', () => {
+      expect(
+        ChangeMetadataSchema.safeParse({ schema: 'spec-driven', parent: ['parent'] }).success
+      ).toBe(false);
+      expect(
+        ChangeMetadataSchema.safeParse({ schema: 'spec-driven', parent: '' }).success
+      ).toBe(false);
+    });
   });
 });
 
@@ -96,6 +175,25 @@ describe('writeChangeMetadata', () => {
 
     expect(content).toContain('schema: spec-driven');
     expect(content).toContain('created: 2025-01-05');
+  });
+
+  it('should write stack metadata using its canonical field shapes', async () => {
+    writeChangeMetadata(changeDir, {
+      schema: 'spec-driven',
+      dependsOn: ['add-user-model'],
+      provides: ['authenticated-session'],
+      requires: ['user-record'],
+      touches: ['auth'],
+      parent: 'modernize-auth',
+    });
+
+    const content = await fs.readFile(path.join(changeDir, '.openspec.yaml'), 'utf-8');
+
+    expect(content).toContain('dependsOn:\n  - add-user-model');
+    expect(content).toContain('provides:\n  - authenticated-session');
+    expect(content).toContain('requires:\n  - user-record');
+    expect(content).toContain('touches:\n  - auth');
+    expect(content).toContain('parent: modernize-auth');
   });
 
   it('should throw error for unknown schema', () => {
@@ -139,6 +237,38 @@ describe('readChangeMetadata', () => {
     expect(result).toEqual({
       schema: 'spec-driven',
       created: '2025-01-05',
+    });
+  });
+
+  it('should read stack metadata without changing legacy fields', async () => {
+    const metaPath = path.join(changeDir, '.openspec.yaml');
+    await fs.writeFile(
+      metaPath,
+      [
+        'schema: spec-driven',
+        'created: "2025-01-05"',
+        'dependsOn:',
+        '  - add-user-model',
+        'provides:',
+        '  - authenticated-session',
+        'requires:',
+        '  - user-record',
+        'touches:',
+        '  - auth',
+        'parent: modernize-auth',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    expect(readChangeMetadata(changeDir)).toEqual({
+      schema: 'spec-driven',
+      created: '2025-01-05',
+      dependsOn: ['add-user-model'],
+      provides: ['authenticated-session'],
+      requires: ['user-record'],
+      touches: ['auth'],
+      parent: 'modernize-auth',
     });
   });
 
