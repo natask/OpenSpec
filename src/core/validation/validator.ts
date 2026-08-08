@@ -13,8 +13,10 @@ import {
 import { parseDeltaSpec, normalizeRequirementName } from '../parsers/requirement-blocks.js';
 import { FileSystemUtils } from '../../utils/file-system.js';
 import {
-  findActiveChangeDependencyCycles,
+  analyzeActiveChangeDependencies,
+  formatBlockedDependency,
   formatDependencyCycle,
+  formatMissingDependency,
 } from './change-dependencies.js';
 
 export class Validator {
@@ -275,13 +277,27 @@ export class Validator {
 
     const changeId = path.basename(changeDir);
     try {
-      const cycles = await findActiveChangeDependencyCycles(changeDir);
-      for (const cycle of cycles) {
-        if (!cycle.slice(0, -1).includes(changeId)) continue;
+      const dependencyAnalysis = await analyzeActiveChangeDependencies(changeDir);
+      if (dependencyAnalysis.cyclicChangeIds.has(changeId)) {
+        const cycle = dependencyAnalysis.cycleByChangeId.get(changeId)!;
         issues.push({
           level: 'ERROR',
           path: 'dependsOn',
           message: formatDependencyCycle(cycle),
+        });
+      }
+      for (const dependencyId of dependencyAnalysis.missingDependencies.get(changeId) ?? []) {
+        issues.push({
+          level: 'ERROR',
+          path: 'dependsOn',
+          message: formatMissingDependency(changeId, dependencyId),
+        });
+      }
+      for (const blocked of dependencyAnalysis.blockedPaths.get(changeId) ?? []) {
+        issues.push({
+          level: 'ERROR',
+          path: 'dependsOn',
+          message: formatBlockedDependency(changeId, blocked),
         });
       }
     } catch {

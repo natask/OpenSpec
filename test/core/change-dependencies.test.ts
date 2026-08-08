@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  analyzeChangeDependencies,
   findDependencyCycles,
   formatDependencyCycle,
 } from '../../src/core/validation/change-dependencies.js';
@@ -39,6 +40,58 @@ describe('change dependency cycle detection', () => {
       ['alpha', ['missing-change']],
       ['bravo', ['alpha']],
     ]))).toEqual([]);
+  });
+
+  it('reports missing targets and deterministic transitive blocker paths', () => {
+    const analysis = analyzeChangeDependencies(new Map([
+      ['root', ['missing-direct', 'middle', 'cycle-zeta']],
+      ['middle', ['leaf']],
+      ['leaf', ['missing-transitive']],
+      ['cycle-zeta', ['cycle-alpha']],
+      ['cycle-alpha', ['cycle-zeta']],
+    ]));
+
+    expect(analysis.missingDependencies.get('root')).toEqual(['missing-direct']);
+    expect(analysis.missingDependencies.get('leaf')).toEqual(['missing-transitive']);
+    expect(analysis.blockedPaths.get('root')).toEqual([
+      {
+        kind: 'cycle',
+        path: ['root', 'cycle-zeta'],
+        cycle: ['cycle-alpha', 'cycle-zeta', 'cycle-alpha'],
+      },
+      {
+        kind: 'missing',
+        path: ['root', 'middle', 'leaf', 'missing-transitive'],
+      },
+    ]);
+    expect(analysis.blockedPaths.get('middle')).toEqual([
+      {
+        kind: 'missing',
+        path: ['middle', 'leaf', 'missing-transitive'],
+      },
+    ]);
+  });
+
+  it('treats archived dependency IDs as resolved', () => {
+    const analysis = analyzeChangeDependencies(
+      new Map([['current', ['archived-change']]]),
+      new Set(['archived-change'])
+    );
+
+    expect(analysis.missingDependencies.size).toBe(0);
+    expect(analysis.blockedPaths.size).toBe(0);
+  });
+
+  it('marks every member of a complex cyclic component', () => {
+    const analysis = analyzeChangeDependencies(new Map([
+      ['alpha', ['bravo', 'echo']],
+      ['bravo', ['alpha']],
+      ['echo', ['alpha']],
+    ]));
+
+    expect(analysis.cycles).toEqual([['alpha', 'bravo', 'alpha']]);
+    expect([...analysis.cyclicChangeIds].sort()).toEqual(['alpha', 'bravo', 'echo']);
+    expect(analysis.cycleByChangeId.get('echo')).toEqual(['alpha', 'bravo', 'alpha']);
   });
 });
 
@@ -87,6 +140,52 @@ describe('cycle-aware change validation', () => {
     const report = await new Validator().validateChangeDeltaSpecs(
       path.join(changesDir, 'independent')
     );
+
+    expect(report.valid).toBe(true);
+    expect(report.issues).not.toContainEqual(expect.objectContaining({ path: 'dependsOn' }));
+  });
+
+  it('fails direct and transitively blocked changes with deterministic missing-target errors', async () => {
+    await writeChange('root', ['middle']);
+    await writeChange('middle', ['missing-change']);
+
+    const validator = new Validator();
+    const middleReport = await validator.validateChangeDeltaSpecs(path.join(changesDir, 'middle'));
+    const rootReport = await validator.validateChangeDeltaSpecs(path.join(changesDir, 'root'));
+
+    expect(middleReport.issues).toContainEqual({
+      level: 'ERROR',
+      path: 'dependsOn',
+      message: 'Missing dependency target "missing-change" referenced by change "middle". Add or restore the change, or remove it from dependsOn.',
+    });
+    expect(rootReport.issues).toContainEqual({
+      level: 'ERROR',
+      path: 'dependsOn',
+      message: 'Change "root" is transitively blocked by unresolved dependency path: root -> middle -> missing-change. Resolve the missing target before continuing.',
+    });
+  });
+
+  it('fails a change transitively blocked by a dependency cycle', async () => {
+    await writeChange('root', ['cycle-bravo']);
+    await writeChange('cycle-bravo', ['cycle-alpha']);
+    await writeChange('cycle-alpha', ['cycle-bravo']);
+
+    const report = await new Validator().validateChangeDeltaSpecs(path.join(changesDir, 'root'));
+
+    expect(report.issues).toContainEqual({
+      level: 'ERROR',
+      path: 'dependsOn',
+      message: 'Change "root" is transitively blocked by cyclic dependency path: root -> cycle-bravo. Break the dependency cycle: cycle-alpha -> cycle-bravo -> cycle-alpha.',
+    });
+  });
+
+  it('accepts a dependency found in date-prefixed archive history', async () => {
+    await writeChange('current', ['completed-change']);
+    const archivedDir = path.join(changesDir, 'archive', '2026-08-08-completed-change');
+    await fs.mkdir(archivedDir, { recursive: true });
+    await fs.writeFile(path.join(archivedDir, 'proposal.md'), '# completed-change\n');
+
+    const report = await new Validator().validateChangeDeltaSpecs(path.join(changesDir, 'current'));
 
     expect(report.valid).toBe(true);
     expect(report.issues).not.toContainEqual(expect.objectContaining({ path: 'dependsOn' }));
