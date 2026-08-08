@@ -19,6 +19,16 @@ export interface ChangeDependencyAnalysis {
   blockedPaths: ReadonlyMap<string, readonly BlockedDependencyPath[]>;
 }
 
+export interface ChangeOverlap {
+  area: string;
+  changeIds: readonly string[];
+}
+
+export interface ActiveChangeValidationAnalysis extends ChangeDependencyAnalysis {
+  overlaps: readonly ChangeOverlap[];
+  overlapsByChangeId: ReadonlyMap<string, readonly ChangeOverlap[]>;
+}
+
 /**
  * Find one deterministic representative cycle for each cyclic component.
  * Missing dependency targets are intentionally ignored here; they are a
@@ -57,6 +67,27 @@ export function analyzeChangeDependencies(
   );
 
   return { cycles, cyclicChangeIds, cycleByChangeId, missingDependencies, blockedPaths };
+}
+
+export function findChangeOverlaps(
+  touchesByChangeId: ReadonlyMap<string, readonly string[]>
+): ChangeOverlap[] {
+  const changesByArea = new Map<string, Set<string>>();
+  for (const changeId of [...touchesByChangeId.keys()].sort((left, right) => left.localeCompare(right))) {
+    for (const area of new Set(touchesByChangeId.get(changeId) ?? [])) {
+      const changeIds = changesByArea.get(area) ?? new Set<string>();
+      changeIds.add(changeId);
+      changesByArea.set(area, changeIds);
+    }
+  }
+
+  return [...changesByArea.entries()]
+    .filter(([, changeIds]) => changeIds.size > 1)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([area, changeIds]) => ({
+      area,
+      changeIds: [...changeIds].sort((left, right) => left.localeCompare(right)),
+    }));
 }
 
 interface CyclicComponent {
@@ -136,14 +167,15 @@ function findCyclicComponents(graph: ChangeDependencyGraph): CyclicComponent[] {
     }));
 }
 
-/** Analyze active changes and archived dependency history adjacent to `changeDir`. */
+/** Analyze stack metadata and archived dependency history adjacent to `changeDir`. */
 export async function analyzeActiveChangeDependencies(
   changeDir: string
-): Promise<ChangeDependencyAnalysis> {
+): Promise<ActiveChangeValidationAnalysis> {
   const changesDir = path.dirname(changeDir);
   const projectRoot = path.resolve(changesDir, '..', '..');
   const entries = await fs.readdir(changesDir, { withFileTypes: true });
   const graph = new Map<string, readonly string[]>();
+  const touchesByChangeId = new Map<string, readonly string[]>();
 
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'archive') continue;
@@ -158,15 +190,27 @@ export async function analyzeActiveChangeDependencies(
     try {
       const metadata = readChangeMetadata(activeChangeDir, projectRoot);
       graph.set(entry.name, metadata?.dependsOn ?? []);
+      touchesByChangeId.set(entry.name, metadata?.touches ?? []);
     } catch {
       // Metadata shape/schema errors are reported by metadata validation. They
       // cannot contribute a trustworthy dependency edge here.
       graph.set(entry.name, []);
+      touchesByChangeId.set(entry.name, []);
     }
   }
 
   const archivedChangeIds = await readArchivedChangeIds(path.join(changesDir, 'archive'));
-  return analyzeChangeDependencies(graph, archivedChangeIds);
+  const dependencyAnalysis = analyzeChangeDependencies(graph, archivedChangeIds);
+  const overlaps = findChangeOverlaps(touchesByChangeId);
+  const overlapsByChangeId = new Map<string, ChangeOverlap[]>();
+  for (const overlap of overlaps) {
+    for (const changeId of overlap.changeIds) {
+      const changeOverlaps = overlapsByChangeId.get(changeId) ?? [];
+      changeOverlaps.push(overlap);
+      overlapsByChangeId.set(changeId, changeOverlaps);
+    }
+  }
+  return { ...dependencyAnalysis, overlaps, overlapsByChangeId };
 }
 
 export function formatDependencyCycle(cycle: DependencyCycle): string {
@@ -182,6 +226,10 @@ export function formatBlockedDependency(changeId: string, blocked: BlockedDepend
     return `Change "${changeId}" is transitively blocked by unresolved dependency path: ${blocked.path.join(' -> ')}. Resolve the missing target before continuing.`;
   }
   return `Change "${changeId}" is transitively blocked by cyclic dependency path: ${blocked.path.join(' -> ')}. Break the dependency cycle: ${blocked.cycle!.join(' -> ')}.`;
+}
+
+export function formatChangeOverlap(overlap: ChangeOverlap): string {
+  return `Active changes ${overlap.changeIds.map(changeId => `"${changeId}"`).join(', ')} all touch "${overlap.area}". Coordinate ownership to avoid overlapping work.`;
 }
 
 function normalizeGraph(graph: ChangeDependencyGraph): Map<string, readonly string[]> {

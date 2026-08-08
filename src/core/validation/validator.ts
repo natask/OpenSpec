@@ -15,6 +15,7 @@ import { FileSystemUtils } from '../../utils/file-system.js';
 import {
   analyzeActiveChangeDependencies,
   formatBlockedDependency,
+  formatChangeOverlap,
   formatDependencyCycle,
   formatMissingDependency,
 } from './change-dependencies.js';
@@ -298,6 +299,13 @@ export class Validator {
           level: 'ERROR',
           path: 'dependsOn',
           message: formatBlockedDependency(changeId, blocked),
+        });
+      }
+      for (const overlap of dependencyAnalysis.overlapsByChangeId.get(changeId) ?? []) {
+        issues.push({
+          level: 'WARNING',
+          path: 'touches',
+          message: formatChangeOverlap(overlap),
         });
       }
     } catch {

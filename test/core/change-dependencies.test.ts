@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   analyzeChangeDependencies,
+  findChangeOverlaps,
   findDependencyCycles,
   formatDependencyCycle,
 } from '../../src/core/validation/change-dependencies.js';
@@ -93,9 +94,23 @@ describe('change dependency cycle detection', () => {
     expect([...analysis.cyclicChangeIds].sort()).toEqual(['alpha', 'bravo', 'echo']);
     expect(analysis.cycleByChangeId.get('echo')).toEqual(['alpha', 'bravo', 'alpha']);
   });
+
+  it('returns deterministic overlaps for shared touch areas', () => {
+    const overlaps = findChangeOverlaps(new Map([
+      ['charlie', ['payments']],
+      ['bravo', ['auth', 'payments', 'auth']],
+      ['alpha', ['payments', 'auth']],
+      ['solo', ['reporting']],
+    ]));
+
+    expect(overlaps).toEqual([
+      { area: 'auth', changeIds: ['alpha', 'bravo'] },
+      { area: 'payments', changeIds: ['alpha', 'bravo', 'charlie'] },
+    ]);
+  });
 });
 
-describe('cycle-aware change validation', () => {
+describe('stack-aware change validation', () => {
   const projectRoot = path.join(process.cwd(), 'test-change-cycle-tmp');
   const changesDir = path.join(projectRoot, 'openspec', 'changes');
 
@@ -191,10 +206,39 @@ describe('cycle-aware change validation', () => {
     expect(report.issues).not.toContainEqual(expect.objectContaining({ path: 'dependsOn' }));
   });
 
+  it('emits deterministic non-blocking warnings for active touch overlaps', async () => {
+    await writeChange('charlie', [], false, ['payments']);
+    await writeChange('alpha', [], false, ['payments', 'auth']);
+    await writeChange('bravo', [], false, ['auth', 'payments']);
+    await writeChange('solo', [], false, ['reporting']);
+
+    const validator = new Validator();
+    const alphaReport = await validator.validateChangeDeltaSpecs(path.join(changesDir, 'alpha'));
+    const soloReport = await validator.validateChangeDeltaSpecs(path.join(changesDir, 'solo'));
+
+    expect(alphaReport.valid).toBe(true);
+    expect(alphaReport.summary.warnings).toBe(2);
+    expect(alphaReport.issues.filter(issue => issue.path === 'touches')).toEqual([
+      {
+        level: 'WARNING',
+        path: 'touches',
+        message: 'Active changes "alpha", "bravo" all touch "auth". Coordinate ownership to avoid overlapping work.',
+      },
+      {
+        level: 'WARNING',
+        path: 'touches',
+        message: 'Active changes "alpha", "bravo", "charlie" all touch "payments". Coordinate ownership to avoid overlapping work.',
+      },
+    ]);
+    expect(soloReport.valid).toBe(true);
+    expect(soloReport.issues).not.toContainEqual(expect.objectContaining({ path: 'touches' }));
+  });
+
   async function writeChange(
     id: string,
     dependsOn: readonly string[],
-    reverseDependencies = false
+    reverseDependencies = false,
+    touches: readonly string[] = []
   ): Promise<void> {
     const changeDir = path.join(changesDir, id);
     const specDir = path.join(changeDir, 'specs', 'example');
@@ -203,7 +247,15 @@ describe('cycle-aware change validation', () => {
     const dependencies = reverseDependencies ? [...dependsOn].reverse() : dependsOn;
     await fs.writeFile(
       path.join(changeDir, '.openspec.yaml'),
-      `schema: spec-driven\ndependsOn:\n${dependencies.map(value => `  - ${value}\n`).join('')}`
+      [
+        'schema: spec-driven\n',
+        dependencies.length > 0
+          ? `dependsOn:\n${dependencies.map(value => `  - ${value}\n`).join('')}`
+          : '',
+        touches.length > 0
+          ? `touches:\n${touches.map(value => `  - ${value}\n`).join('')}`
+          : '',
+      ].join('')
     );
     await fs.writeFile(
       path.join(specDir, 'spec.md'),
