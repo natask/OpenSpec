@@ -14,7 +14,7 @@
 
 ## 3. Sequencing Commands
 
-- [ ] 3.1 Add `openspec change graph` to display dependency order for active changes
+- [x] 3.1 Add `openspec change graph` to display dependency order for active changes
 - [ ] 3.2 Add `openspec change next` to suggest unblocked changes in recommended order
 - [ ] 3.3 Add tests for topological ordering and deterministic tie-breaking (lexicographic by change ID at equal depth)
 

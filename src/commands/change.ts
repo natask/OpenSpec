@@ -6,6 +6,17 @@ import { ChangeParser } from '../core/parsers/change-parser.js';
 import { Change } from '../core/schemas/index.js';
 import { isInteractive } from '../utils/interactive.js';
 import { getActiveChangeIds } from '../utils/item-discovery.js';
+import {
+  analyzeActiveChangeDependencies,
+  formatBlockedDependency,
+  formatChangeOverlap,
+  formatDependencyCycle,
+  formatMissingDependency,
+  formatUnmatchedRequirement,
+  getDependencyOrder,
+  type ActiveChangeValidationAnalysis,
+} from '../core/validation/change-dependencies.js';
+import type { ValidationIssue } from '../core/validation/types.js';
 
 // Constants for better maintainability
 const ARCHIVE_DIR = 'archive';
@@ -239,6 +250,37 @@ export class ChangeCommand {
     }
   }
 
+  async graph(): Promise<void> {
+    const changesPath = path.join(process.cwd(), 'openspec', 'changes');
+    const analysis = await analyzeActiveChangeDependencies(path.join(changesPath, '.graph'));
+
+    if (analysis.activeDependencies.size === 0) {
+      console.log('No active changes found.');
+      return;
+    }
+
+    const issues = this.getGraphIssues(analysis);
+    for (const issue of issues) {
+      const prefix = issue.level === 'ERROR' ? '✗' : '⚠';
+      console.error(`${prefix} [${issue.level}] ${issue.path}: ${issue.message}`);
+    }
+    if (issues.some(issue => issue.level === 'ERROR')) {
+      process.exitCode = 1;
+      return;
+    }
+
+    const order = getDependencyOrder(analysis.activeDependencies);
+    console.log('Recommended dependency order:');
+    order.forEach((changeId, index) => {
+      const dependencies = [...new Set(analysis.activeDependencies.get(changeId) ?? [])]
+        .sort((left, right) => left.localeCompare(right));
+      const relationship = dependencies.length > 0
+        ? ` (depends on: ${dependencies.join(', ')})`
+        : '';
+      console.log(`${index + 1}. ${changeId}${relationship}`);
+    });
+  }
+
   private async getActiveChanges(changesPath: string): Promise<string[]> {
     try {
       const entries = await fs.readdir(changesPath, { withFileTypes: true });
@@ -279,6 +321,44 @@ export class ChangeCommand {
     }
     
     return { total, completed };
+  }
+
+  private getGraphIssues(analysis: ActiveChangeValidationAnalysis): ValidationIssue[] {
+    const issues: ValidationIssue[] = [];
+    for (const cycle of analysis.cycles) {
+      issues.push({ level: 'ERROR', path: 'dependsOn', message: formatDependencyCycle(cycle) });
+    }
+    for (const [changeId, dependencies] of analysis.missingDependencies) {
+      for (const dependencyId of dependencies) {
+        issues.push({
+          level: 'ERROR',
+          path: 'dependsOn',
+          message: formatMissingDependency(changeId, dependencyId),
+        });
+      }
+    }
+    for (const [changeId, blockedPaths] of analysis.blockedPaths) {
+      for (const blocked of blockedPaths) {
+        issues.push({
+          level: 'ERROR',
+          path: 'dependsOn',
+          message: formatBlockedDependency(changeId, blocked),
+        });
+      }
+    }
+    for (const overlap of analysis.overlaps) {
+      issues.push({ level: 'WARNING', path: 'touches', message: formatChangeOverlap(overlap) });
+    }
+    for (const [changeId, markers] of analysis.unmatchedRequiresByChangeId) {
+      for (const marker of markers) {
+        issues.push({
+          level: 'WARNING',
+          path: 'requires',
+          message: formatUnmatchedRequirement(changeId, marker),
+        });
+      }
+    }
+    return issues;
   }
 
   private printNextSteps(): void {

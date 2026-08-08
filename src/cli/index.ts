@@ -265,6 +265,19 @@ changeCmd
     }
   });
 
+changeCmd
+  .command('graph')
+  .description('Display active change dependencies in recommended order')
+  .action(async () => {
+    try {
+      const changeCommand = new ChangeCommand();
+      await changeCommand.graph();
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
 program
   .command('archive [change-name]')
   .description('Archive a completed change and update main specs')

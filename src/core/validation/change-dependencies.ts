@@ -25,6 +25,7 @@ export interface ChangeOverlap {
 }
 
 export interface ActiveChangeValidationAnalysis extends ChangeDependencyAnalysis {
+  activeDependencies: ChangeDependencyGraph;
   overlaps: readonly ChangeOverlap[];
   overlapsByChangeId: ReadonlyMap<string, readonly ChangeOverlap[]>;
   unmatchedRequiresByChangeId: ReadonlyMap<string, readonly string[]>;
@@ -103,6 +104,45 @@ export function findUnmatchedRequirements(
     if (unmatched.length > 0) result.set(changeId, unmatched);
   }
   return result;
+}
+
+export function getDependencyOrder(graph: ChangeDependencyGraph): string[] {
+  const nodes = [...graph.keys()].sort((left, right) => left.localeCompare(right));
+  const knownNodes = new Set(nodes);
+  const remainingDependencies = new Map<string, number>();
+  const dependents = new Map<string, string[]>();
+
+  for (const node of nodes) {
+    const dependencies = [...new Set(graph.get(node) ?? [])]
+      .filter(dependency => knownNodes.has(dependency));
+    remainingDependencies.set(node, dependencies.length);
+    for (const dependency of dependencies) {
+      const dependencyDependents = dependents.get(dependency) ?? [];
+      dependencyDependents.push(node);
+      dependents.set(dependency, dependencyDependents);
+    }
+  }
+
+  let layer = nodes.filter(node => remainingDependencies.get(node) === 0);
+  const order: string[] = [];
+  while (layer.length > 0) {
+    layer.sort((left, right) => left.localeCompare(right));
+    order.push(...layer);
+    const nextLayer = new Set<string>();
+    for (const node of layer) {
+      for (const dependent of dependents.get(node) ?? []) {
+        const remaining = remainingDependencies.get(dependent)! - 1;
+        remainingDependencies.set(dependent, remaining);
+        if (remaining === 0) nextLayer.add(dependent);
+      }
+    }
+    layer = [...nextLayer];
+  }
+
+  if (order.length !== nodes.length) {
+    throw new Error('Cannot compute dependency order while the active change graph contains a cycle.');
+  }
+  return order;
 }
 
 interface CyclicComponent {
@@ -240,6 +280,7 @@ export async function analyzeActiveChangeDependencies(
   );
   return {
     ...dependencyAnalysis,
+    activeDependencies: graph,
     overlaps,
     overlapsByChangeId,
     unmatchedRequiresByChangeId,
