@@ -12,6 +12,10 @@ import {
 } from './constants.js';
 import { parseDeltaSpec, normalizeRequirementName } from '../parsers/requirement-blocks.js';
 import { FileSystemUtils } from '../../utils/file-system.js';
+import {
+  findActiveChangeDependencyCycles,
+  formatDependencyCycle,
+} from './change-dependencies.js';
 
 export class Validator {
   private strictMode: boolean;
@@ -267,6 +271,22 @@ export class Validator {
 
     if (totalDeltas === 0) {
       issues.push({ level: 'ERROR', path: 'file', message: this.enrichTopLevelError('change', VALIDATION_MESSAGES.CHANGE_NO_DELTAS) });
+    }
+
+    const changeId = path.basename(changeDir);
+    try {
+      const cycles = await findActiveChangeDependencyCycles(changeDir);
+      for (const cycle of cycles) {
+        if (!cycle.slice(0, -1).includes(changeId)) continue;
+        issues.push({
+          level: 'ERROR',
+          path: 'dependsOn',
+          message: formatDependencyCycle(cycle),
+        });
+      }
+    } catch {
+      // A non-standard standalone fixture may not have an openspec/changes
+      // parent. Delta validation remains usable in that context.
     }
 
     return this.createReport(issues);
