@@ -282,6 +282,47 @@ describe('stack-aware change validation', () => {
     ]);
   });
 
+  it('covers section 2 cases with deterministic issue ordering', async () => {
+    await writeChange(
+      'alpha',
+      ['bravo', 'missing-change'],
+      false,
+      ['shared-area'],
+      ['missing-marker']
+    );
+    await writeChange('bravo', ['alpha'], false, ['shared-area']);
+
+    const validator = new Validator();
+    const firstReport = await validator.validateChangeDeltaSpecs(path.join(changesDir, 'alpha'));
+    const secondReport = await validator.validateChangeDeltaSpecs(path.join(changesDir, 'alpha'));
+
+    expect(secondReport).toEqual(firstReport);
+    expect(firstReport.valid).toBe(false);
+    expect(firstReport.summary).toEqual({ errors: 2, warnings: 2, info: 0 });
+    expect(firstReport.issues).toEqual([
+      {
+        level: 'ERROR',
+        path: 'dependsOn',
+        message: 'Dependency cycle detected: alpha -> bravo -> alpha. Remove one dependsOn entry to break the cycle.',
+      },
+      {
+        level: 'ERROR',
+        path: 'dependsOn',
+        message: 'Missing dependency target "missing-change" referenced by change "alpha". Add or restore the change, or remove it from dependsOn.',
+      },
+      {
+        level: 'WARNING',
+        path: 'touches',
+        message: 'Active changes "alpha", "bravo" all touch "shared-area". Coordinate ownership to avoid overlapping work.',
+      },
+      {
+        level: 'WARNING',
+        path: 'requires',
+        message: 'No active or archived change provides required marker "missing-marker" for change "alpha". Add a provider or remove the marker from requires.',
+      },
+    ]);
+  });
+
   async function writeChange(
     id: string,
     dependsOn: readonly string[],
