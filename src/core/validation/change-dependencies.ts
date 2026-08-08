@@ -27,6 +27,7 @@ export interface ChangeOverlap {
 export interface ActiveChangeValidationAnalysis extends ChangeDependencyAnalysis {
   overlaps: readonly ChangeOverlap[];
   overlapsByChangeId: ReadonlyMap<string, readonly ChangeOverlap[]>;
+  unmatchedRequiresByChangeId: ReadonlyMap<string, readonly string[]>;
 }
 
 /**
@@ -88,6 +89,20 @@ export function findChangeOverlaps(
       area,
       changeIds: [...changeIds].sort((left, right) => left.localeCompare(right)),
     }));
+}
+
+export function findUnmatchedRequirements(
+  requiresByChangeId: ReadonlyMap<string, readonly string[]>,
+  providedMarkers: ReadonlySet<string>
+): Map<string, readonly string[]> {
+  const result = new Map<string, readonly string[]>();
+  for (const changeId of [...requiresByChangeId.keys()].sort((left, right) => left.localeCompare(right))) {
+    const unmatched = [...new Set(requiresByChangeId.get(changeId) ?? [])]
+      .filter(marker => !providedMarkers.has(marker))
+      .sort((left, right) => left.localeCompare(right));
+    if (unmatched.length > 0) result.set(changeId, unmatched);
+  }
+  return result;
 }
 
 interface CyclicComponent {
@@ -176,6 +191,8 @@ export async function analyzeActiveChangeDependencies(
   const entries = await fs.readdir(changesDir, { withFileTypes: true });
   const graph = new Map<string, readonly string[]>();
   const touchesByChangeId = new Map<string, readonly string[]>();
+  const requiresByChangeId = new Map<string, readonly string[]>();
+  const activeProviderMarkers = new Set<string>();
 
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'archive') continue;
@@ -191,16 +208,22 @@ export async function analyzeActiveChangeDependencies(
       const metadata = readChangeMetadata(activeChangeDir, projectRoot);
       graph.set(entry.name, metadata?.dependsOn ?? []);
       touchesByChangeId.set(entry.name, metadata?.touches ?? []);
+      requiresByChangeId.set(entry.name, metadata?.requires ?? []);
+      for (const marker of metadata?.provides ?? []) activeProviderMarkers.add(marker);
     } catch {
       // Metadata shape/schema errors are reported by metadata validation. They
       // cannot contribute a trustworthy dependency edge here.
       graph.set(entry.name, []);
       touchesByChangeId.set(entry.name, []);
+      requiresByChangeId.set(entry.name, []);
     }
   }
 
-  const archivedChangeIds = await readArchivedChangeIds(path.join(changesDir, 'archive'));
-  const dependencyAnalysis = analyzeChangeDependencies(graph, archivedChangeIds);
+  const archivedHistory = await readArchivedChangeHistory(
+    path.join(changesDir, 'archive'),
+    projectRoot
+  );
+  const dependencyAnalysis = analyzeChangeDependencies(graph, archivedHistory.changeIds);
   const overlaps = findChangeOverlaps(touchesByChangeId);
   const overlapsByChangeId = new Map<string, ChangeOverlap[]>();
   for (const overlap of overlaps) {
@@ -210,7 +233,17 @@ export async function analyzeActiveChangeDependencies(
       overlapsByChangeId.set(changeId, changeOverlaps);
     }
   }
-  return { ...dependencyAnalysis, overlaps, overlapsByChangeId };
+  const providedMarkers = new Set([...activeProviderMarkers, ...archivedHistory.providedMarkers]);
+  const unmatchedRequiresByChangeId = findUnmatchedRequirements(
+    requiresByChangeId,
+    providedMarkers
+  );
+  return {
+    ...dependencyAnalysis,
+    overlaps,
+    overlapsByChangeId,
+    unmatchedRequiresByChangeId,
+  };
 }
 
 export function formatDependencyCycle(cycle: DependencyCycle): string {
@@ -230,6 +263,10 @@ export function formatBlockedDependency(changeId: string, blocked: BlockedDepend
 
 export function formatChangeOverlap(overlap: ChangeOverlap): string {
   return `Active changes ${overlap.changeIds.map(changeId => `"${changeId}"`).join(', ')} all touch "${overlap.area}". Coordinate ownership to avoid overlapping work.`;
+}
+
+export function formatUnmatchedRequirement(changeId: string, marker: string): string {
+  return `No active or archived change provides required marker "${marker}" for change "${changeId}". Add a provider or remove the marker from requires.`;
 }
 
 function normalizeGraph(graph: ChangeDependencyGraph): Map<string, readonly string[]> {
@@ -324,13 +361,22 @@ function comparePaths(left: readonly string[], right: readonly string[]): number
   return left.join('\0').localeCompare(right.join('\0'));
 }
 
-async function readArchivedChangeIds(archiveDir: string): Promise<Set<string>> {
-  const result = new Set<string>();
+interface ArchivedChangeHistory {
+  changeIds: Set<string>;
+  providedMarkers: Set<string>;
+}
+
+async function readArchivedChangeHistory(
+  archiveDir: string,
+  projectRoot: string
+): Promise<ArchivedChangeHistory> {
+  const changeIds = new Set<string>();
+  const providedMarkers = new Set<string>();
   let entries: Dirent[];
   try {
     entries = await fs.readdir(archiveDir, { withFileTypes: true });
   } catch {
-    return result;
+    return { changeIds, providedMarkers };
   }
 
   for (const entry of entries) {
@@ -340,12 +386,18 @@ async function readArchivedChangeIds(archiveDir: string): Promise<Set<string>> {
     } catch {
       continue;
     }
-    result.add(entry.name);
+    changeIds.add(entry.name);
     const datedId = entry.name.match(/^\d{4}-\d{2}-\d{2}-(.+)$/)?.[1];
-    if (datedId) result.add(datedId);
+    if (datedId) changeIds.add(datedId);
+    try {
+      const metadata = readChangeMetadata(path.join(archiveDir, entry.name), projectRoot);
+      for (const marker of metadata?.provides ?? []) providedMarkers.add(marker);
+    } catch {
+      // Invalid archived metadata cannot provide a trustworthy marker.
+    }
   }
 
-  return result;
+  return { changeIds, providedMarkers };
 }
 
 function representativeCycle(

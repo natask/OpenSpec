@@ -5,6 +5,7 @@ import {
   analyzeChangeDependencies,
   findChangeOverlaps,
   findDependencyCycles,
+  findUnmatchedRequirements,
   formatDependencyCycle,
 } from '../../src/core/validation/change-dependencies.js';
 import { Validator } from '../../src/core/validation/validator.js';
@@ -106,6 +107,22 @@ describe('change dependency cycle detection', () => {
     expect(overlaps).toEqual([
       { area: 'auth', changeIds: ['alpha', 'bravo'] },
       { area: 'payments', changeIds: ['alpha', 'bravo', 'charlie'] },
+    ]);
+  });
+
+  it('returns sorted unmatched requirements after provider lookup', () => {
+    const unmatched = findUnmatchedRequirements(
+      new Map([
+        ['charlie', ['missing-charlie']],
+        ['alpha', ['missing-zeta', 'provided', 'missing-alpha', 'missing-zeta']],
+        ['bravo', ['provided']],
+      ]),
+      new Set(['provided'])
+    );
+
+    expect([...unmatched.entries()]).toEqual([
+      ['alpha', ['missing-alpha', 'missing-zeta']],
+      ['charlie', ['missing-charlie']],
     ]);
   });
 });
@@ -234,11 +251,44 @@ describe('stack-aware change validation', () => {
     expect(soloReport.issues).not.toContainEqual(expect.objectContaining({ path: 'touches' }));
   });
 
+  it('warns only for required markers absent from active and archived providers', async () => {
+    await writeChange('consumer', [], false, [], ['missing-zeta', 'active-marker', 'missing-alpha', 'archived-marker']);
+    await writeChange('active-provider', [], false, [], [], ['active-marker']);
+
+    const archivedDir = path.join(changesDir, 'archive', '2026-08-08-archived-provider');
+    await fs.mkdir(archivedDir, { recursive: true });
+    await fs.writeFile(path.join(archivedDir, 'proposal.md'), '# archived-provider\n');
+    await fs.writeFile(
+      path.join(archivedDir, '.openspec.yaml'),
+      'schema: spec-driven\nprovides:\n  - archived-marker\n'
+    );
+
+    const report = await new Validator().validateChangeDeltaSpecs(
+      path.join(changesDir, 'consumer')
+    );
+
+    expect(report.valid).toBe(true);
+    expect(report.issues.filter(issue => issue.path === 'requires')).toEqual([
+      {
+        level: 'WARNING',
+        path: 'requires',
+        message: 'No active or archived change provides required marker "missing-alpha" for change "consumer". Add a provider or remove the marker from requires.',
+      },
+      {
+        level: 'WARNING',
+        path: 'requires',
+        message: 'No active or archived change provides required marker "missing-zeta" for change "consumer". Add a provider or remove the marker from requires.',
+      },
+    ]);
+  });
+
   async function writeChange(
     id: string,
     dependsOn: readonly string[],
     reverseDependencies = false,
-    touches: readonly string[] = []
+    touches: readonly string[] = [],
+    requires: readonly string[] = [],
+    provides: readonly string[] = []
   ): Promise<void> {
     const changeDir = path.join(changesDir, id);
     const specDir = path.join(changeDir, 'specs', 'example');
@@ -254,6 +304,12 @@ describe('stack-aware change validation', () => {
           : '',
         touches.length > 0
           ? `touches:\n${touches.map(value => `  - ${value}\n`).join('')}`
+          : '',
+        requires.length > 0
+          ? `requires:\n${requires.map(value => `  - ${value}\n`).join('')}`
+          : '',
+        provides.length > 0
+          ? `provides:\n${provides.map(value => `  - ${value}\n`).join('')}`
           : '',
       ].join('')
     );

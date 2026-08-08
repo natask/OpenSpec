@@ -18,6 +18,7 @@ import {
   formatChangeOverlap,
   formatDependencyCycle,
   formatMissingDependency,
+  formatUnmatchedRequirement,
 } from './change-dependencies.js';
 
 export class Validator {
@@ -306,6 +307,13 @@ export class Validator {
           level: 'WARNING',
           path: 'touches',
           message: formatChangeOverlap(overlap),
+        });
+      }
+      for (const marker of dependencyAnalysis.unmatchedRequiresByChangeId.get(changeId) ?? []) {
+        issues.push({
+          level: 'WARNING',
+          path: 'requires',
+          message: formatUnmatchedRequirement(changeId, marker),
         });
       }
     } catch {
