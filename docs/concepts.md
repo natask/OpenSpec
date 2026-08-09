@@ -276,6 +276,55 @@ Keep capability markers separate from order. `provides` and `requires` describe
 the contract between changes. `dependsOn` tells OpenSpec which change comes
 first.
 
+### Migrate `IMPLEMENTATION_ORDER.md`
+
+Some projects record change order in
+`openspec/changes/IMPLEMENTATION_ORDER.md`. Keep that file when it explains why
+the work is ordered. OpenSpec treats it as optional narrative. Commands read
+dependency order from each change's `.openspec.yaml` file.
+
+Move each required ordering relationship into `dependsOn`. For example, this
+old order says that each change needs the one before it:
+
+```markdown
+# Implementation order
+
+1. `add-user-model`
+2. `add-session-api`
+3. `add-login-ui`
+```
+
+Add the first edge to `add-session-api/.openspec.yaml`:
+
+```yaml
+schema: spec-driven
+dependsOn:
+  - add-user-model
+```
+
+Add the next edge to `add-login-ui/.openspec.yaml`:
+
+```yaml
+schema: spec-driven
+dependsOn:
+  - add-session-api
+```
+
+Check the old list before you copy its order. A list may place independent work
+in sequence for convenience. Add only the dependencies that the work requires.
+
+Use this migration loop:
+
+1. Read each ordering statement in `IMPLEMENTATION_ORDER.md`.
+2. Add each real prerequisite to the dependent change's `dependsOn` list.
+3. Run `openspec change graph` and fix any missing targets or cycles.
+4. Run `openspec change next` and check that the expected changes are ready.
+5. Keep the old file when it adds context. Remove it when the metadata says all
+   that people need.
+
+When the file and metadata disagree, OpenSpec follows `.openspec.yaml`. Update
+stale narrative so people see the same order as the commands.
+
 ### Validation signals
 
 OpenSpec treats these conditions as blockers:
