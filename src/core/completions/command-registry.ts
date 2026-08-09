@@ -212,6 +212,13 @@ export const COMMAND_REGISTRY: CommandDefinition[] = [
           COMMON_FLAGS.noInteractive,
         ],
       },
+      {
+        name: 'split',
+        description: 'Scaffold child changes from top-level task sections',
+        acceptsPositional: true,
+        positionalType: 'change-id',
+        flags: [],
+      },
     ],
   },
   {

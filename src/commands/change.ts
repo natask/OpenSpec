@@ -6,6 +6,8 @@ import { ChangeParser } from '../core/parsers/change-parser.js';
 import { Change } from '../core/schemas/index.js';
 import { isInteractive } from '../utils/interactive.js';
 import { getActiveChangeIds } from '../utils/item-discovery.js';
+import { createChange, validateChangeName } from '../utils/change-utils.js';
+import { readChangeMetadata } from '../utils/change-metadata.js';
 import {
   analyzeActiveChangeDependencies,
   formatBlockedDependency,
@@ -292,6 +294,67 @@ export class ChangeCommand {
     });
   }
 
+  async split(changeName: string): Promise<void> {
+    const nameValidation = validateChangeName(changeName);
+    if (!nameValidation.valid) {
+      throw new Error(nameValidation.error);
+    }
+
+    const projectRoot = process.cwd();
+    const changesPath = path.join(projectRoot, 'openspec', 'changes');
+    const sourceDir = path.join(changesPath, changeName);
+    const proposalPath = path.join(sourceDir, 'proposal.md');
+    const tasksPath = path.join(sourceDir, 'tasks.md');
+
+    try {
+      await fs.access(proposalPath);
+    } catch {
+      throw new Error(`Change "${changeName}" not found at ${sourceDir}`);
+    }
+
+    let tasksContent: string;
+    try {
+      tasksContent = await fs.readFile(tasksPath, 'utf-8');
+    } catch {
+      throw new Error(
+        `Change "${changeName}" cannot be split because ${tasksPath} is missing or unreadable.`
+      );
+    }
+
+    const childIds = this.getSplitChildIds(changeName, tasksContent);
+    if (childIds.length === 0) {
+      throw new Error(
+        `Change "${changeName}" has no level-two task sections to scaffold as child slices.`
+      );
+    }
+
+    const duplicateId = childIds.find((childId, index) => childIds.indexOf(childId) !== index);
+    if (duplicateId) {
+      throw new Error(
+        `Change "${changeName}" has task sections that produce duplicate child ID "${duplicateId}".`
+      );
+    }
+
+    for (const childId of childIds) {
+      try {
+        await fs.access(path.join(changesPath, childId));
+        throw new Error(
+          `Cannot split change "${changeName}": child change "${childId}" already exists.`
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+
+    const sourceMetadata = readChangeMetadata(sourceDir, projectRoot);
+    for (const childId of childIds) {
+      await createChange(projectRoot, childId, { schema: sourceMetadata?.schema });
+    }
+
+    console.log(`Scaffolded ${childIds.length} child changes from "${changeName}":`);
+    childIds.forEach(childId => console.log(`- ${childId}`));
+  }
+
   private async getActiveChanges(changesPath: string): Promise<string[]> {
     try {
       const entries = await fs.readdir(changesPath, { withFileTypes: true });
@@ -332,6 +395,17 @@ export class ChangeCommand {
     }
     
     return { total, completed };
+  }
+
+  private getSplitChildIds(changeName: string, tasksContent: string): string[] {
+    return [...tasksContent.matchAll(/^##\s+(?:\d+(?:\.\d+)*[.)]?\s+)?(.+?)\s*$/gm)]
+      .map(([, title]) => title
+        .normalize('NFKD')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, ''))
+      .filter(slug => slug.length > 0)
+      .map(slug => `${changeName}-${slug}`);
   }
 
   private getGraphIssues(analysis: ActiveChangeValidationAnalysis): ValidationIssue[] {

@@ -291,6 +291,19 @@ changeCmd
     }
   });
 
+changeCmd
+  .command('split <change-id>')
+  .description('Scaffold child changes from top-level task sections')
+  .action(async (changeId: string) => {
+    try {
+      const changeCommand = new ChangeCommand();
+      await changeCommand.split(changeId);
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
 program
   .command('archive [change-name]')
   .description('Archive a completed change and update main specs')

@@ -20,7 +20,7 @@
 
 ## 4. Split Scaffolding
 
-- [ ] 4.1 Add `openspec change split <change-id>` to scaffold child slices
+- [x] 4.1 Add `openspec change split <change-id>` to scaffold child slices
 - [ ] 4.2 Ensure generated children include parent/dependency metadata and stub proposal/tasks files
 - [ ] 4.3 Convert the source change into a parent planning container as part of split (no duplicate child implementation tasks)
 - [ ] 4.4 Add tests for split output structure, source-change parent conversion, and deterministic re-split error behavior when overwrite mode is not requested
