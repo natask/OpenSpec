@@ -9,6 +9,7 @@ The OpenSpec CLI (`openspec`) provides terminal commands for project setup, vali
 | **Setup** | `init`, `update` | Initialize and update OpenSpec in your project |
 | **Browsing** | `list`, `view`, `show` | Explore changes and specs |
 | **Validation** | `validate` | Check changes and specs for issues |
+| Planning | `change graph`, `change next`, `change split` | Order active changes and split large changes |
 | **Lifecycle** | `archive` | Finalize completed changes |
 | **Workflow** | `status`, `instructions`, `templates`, `schemas` | Artifact-driven workflow support |
 | **Schemas** | `schema init`, `schema fork`, `schema validate`, `schema which` | Create and manage custom workflows |
@@ -347,6 +348,162 @@ Validating add-dark-mode...
   }
 }
 ```
+
+---
+
+## Planning commands
+
+These commands use the stack metadata in each change's `.openspec.yaml` file.
+See [Change stacks](concepts.md#change-stacks) for the metadata rules. The
+`change` command group prints its current deprecation notice to standard error.
+
+### `openspec change graph`
+
+Show the dependency order for all active changes.
+
+```text
+openspec change graph
+```
+
+The command checks the full active graph before it prints an order. It exits
+with code `1` when it finds a missing dependency, a cycle, or a change blocked
+through either condition. It prints overlap and unmatched capability markers as
+warnings. Warnings do not change the order.
+
+The command sorts each dependency layer by change ID. Repeated runs over the
+same metadata produce the same output.
+
+Example:
+
+```yaml
+# openspec/changes/add-auth-session/.openspec.yaml
+schema: spec-driven
+dependsOn:
+  - add-user-model
+```
+
+```bash
+openspec change graph
+```
+
+```text
+Recommended dependency order:
+1. add-user-model
+2. add-auth-session (depends on: add-user-model)
+```
+
+The command prints `No active changes found.` when the project has no active
+change with a `proposal.md` file.
+
+### `openspec change next`
+
+List active changes whose dependencies are resolved.
+
+```text
+openspec change next
+```
+
+An active dependency keeps its dependent change out of this list. An archived
+dependency counts as resolved. The command validates the full graph first and
+exits with code `1` when the graph has a blocker.
+
+Example before `add-user-model` is archived:
+
+```bash
+openspec change next
+```
+
+```text
+Recommended next changes:
+1. add-user-model
+```
+
+Example after `add-user-model` is archived:
+
+```text
+Recommended next changes:
+1. add-auth-session
+```
+
+### `openspec change split`
+
+Split the level-two sections in a change's `tasks.md` file into child change
+scaffolds.
+
+```text
+openspec change split <change-id> [options]
+```
+
+Arguments:
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `change-id` | Yes | Source change with a readable `proposal.md` and `tasks.md` |
+
+Options:
+
+| Option | Description |
+|--------|-------------|
+| `--overwrite` | Regenerate managed files in child changes owned by the source |
+| `--force` | Alias for `--overwrite` |
+
+Given this source task file:
+
+```markdown
+## 1. Storage layer
+
+- [ ] 1.1 Add storage
+
+## 2. HTTP API
+
+- [ ] 2.1 Add the API
+```
+
+Run:
+
+```bash
+openspec change split add-session-store
+```
+
+The command creates these children:
+
+```text
+openspec/changes/add-session-store-storage-layer/
+openspec/changes/add-session-store-http-api/
+```
+
+Each child gets `.openspec.yaml`, `proposal.md`, and `tasks.md`. The first child
+depends on the source change. Each later child depends on the child before it.
+Every child sets `parent` to the source change.
+
+The command moves each implementation section into its child `tasks.md`. It
+replaces the source task file with a child tracking plan. It keeps the source
+proposal, metadata, and task preamble.
+
+A second run without an overwrite flag exits with code `1` before it changes
+the source or any child. Use an overwrite flag only when you intend to replace
+the managed child files:
+
+```bash
+openspec change split add-session-store --overwrite
+
+# Same behavior
+openspec change split add-session-store --force
+```
+
+Overwrite mode replaces only these managed files:
+
+```text
+.openspec.yaml
+proposal.md
+tasks.md
+```
+
+It keeps other child files. It also checks that each existing child names the
+source in its `parent` metadata. It refuses foreign child directories,
+symlinked managed paths, and managed paths that are not regular files. If a
+write fails, it restores the prior managed files and removes new child
+directories from that run.
 
 ---
 

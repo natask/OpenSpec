@@ -29,7 +29,7 @@
 ## 5. Documentation
 
 - [x] 5.1 Document stack metadata and sequencing workflow in `docs/concepts.md`
-- [ ] 5.2 Document new change commands and usage examples in `docs/cli.md`
+- [x] 5.2 Document new change commands and usage examples in `docs/cli.md`
 - [ ] 5.3 Add guidance for breaking large changes into independently mergeable slices
 - [ ] 5.4 Document migration guidance for `openspec/changes/IMPLEMENTATION_ORDER.md` as optional narrative, not dependency source of truth
 
