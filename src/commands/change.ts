@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
 import { JsonConverter } from '../core/converters/json-converter.js';
 import { Validator } from '../core/validation/validator.js';
 import { ChangeParser } from '../core/parsers/change-parser.js';
@@ -24,6 +25,7 @@ import type { ValidationIssue } from '../core/validation/types.js';
 interface SplitChild {
   id: string;
   title: string;
+  tasksContent: string;
 }
 
 // Constants for better maintainability
@@ -353,25 +355,45 @@ export class ChangeCommand {
     }
 
     const sourceMetadata = readChangeMetadata(sourceDir, projectRoot);
-    for (const [index, child] of children.entries()) {
-      const predecessorId = index === 0 ? changeName : children[index - 1].id;
-      await createChange(projectRoot, child.id, {
-        schema: sourceMetadata?.schema,
-        metadata: {
-          parent: changeName,
-          dependsOn: [predecessorId],
-        },
-      });
-      await fs.writeFile(
-        path.join(changesPath, child.id, 'proposal.md'),
-        this.getSplitProposalStub(changeName, child.title),
-        'utf-8'
+    const createdChildDirs: string[] = [];
+    try {
+      for (const [index, child] of children.entries()) {
+        const predecessorId = index === 0 ? changeName : children[index - 1].id;
+        await createChange(projectRoot, child.id, {
+          schema: sourceMetadata?.schema,
+          metadata: {
+            parent: changeName,
+            dependsOn: [predecessorId],
+          },
+        });
+        const childDir = path.join(changesPath, child.id);
+        createdChildDirs.push(childDir);
+        await fs.writeFile(
+          path.join(childDir, 'proposal.md'),
+          this.getSplitProposalStub(changeName, child.title),
+          'utf-8'
+        );
+        await fs.writeFile(path.join(childDir, 'tasks.md'), child.tasksContent, 'utf-8');
+      }
+
+      await this.replaceFileAtomically(
+        tasksPath,
+        this.getParentPlanningTasks(children, tasksContent)
       );
-      await fs.writeFile(
-        path.join(changesPath, child.id, 'tasks.md'),
-        this.getSplitTasksStub(child.title),
-        'utf-8'
+    } catch (error) {
+      const rollbackResults = await Promise.allSettled(
+        createdChildDirs.map(childDir => fs.rm(childDir, { recursive: true, force: true }))
       );
+      const rollbackFailures = rollbackResults
+        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        .map(result => result.reason);
+      if (rollbackFailures.length > 0) {
+        throw new AggregateError(
+          [error, ...rollbackFailures],
+          `Split of change "${changeName}" failed and child scaffold rollback was incomplete.`
+        );
+      }
+      throw error;
     }
 
     console.log(`Scaffolded ${childIds.length} child changes from "${changeName}":`);
@@ -421,17 +443,25 @@ export class ChangeCommand {
   }
 
   private getSplitChildren(changeName: string, tasksContent: string): SplitChild[] {
-    return [...tasksContent.matchAll(/^##\s+(?:\d+(?:\.\d+)*[.)]?\s+)?(.+?)\s*$/gm)]
-      .map(([, title]) => ({
-        title: title.trim(),
-        slug: title
+    const sections = [...tasksContent.matchAll(/^##\s+(?:\d+(?:\.\d+)*[.)]?\s+)?(.+?)\s*$/gm)];
+    return sections
+      .map((match, index) => ({
+        title: match[1].trim(),
+        slug: match[1]
           .normalize('NFKD')
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '-')
           .replace(/^-+|-+$/g, ''),
+        tasksContent: `${tasksContent
+          .slice(match.index, sections[index + 1]?.index ?? tasksContent.length)
+          .trim()}\n`,
       }))
       .filter(child => child.slug.length > 0)
-      .map(child => ({ id: `${changeName}-${child.slug}`, title: child.title }));
+      .map(child => ({
+        id: `${changeName}-${child.slug}`,
+        title: child.title,
+        tasksContent: child.tasksContent,
+      }));
   }
 
   private getSplitProposalStub(parentId: string, title: string): string {
@@ -457,13 +487,50 @@ export class ChangeCommand {
     ].join('\n');
   }
 
-  private getSplitTasksStub(title: string): string {
+  private getParentPlanningTasks(
+    children: readonly SplitChild[],
+    originalTasksContent: string
+  ): string {
+    const firstSectionIndex = originalTasksContent.search(/^##\s+/m);
+    const originalPreamble = firstSectionIndex > 0
+      ? originalTasksContent.slice(0, firstSectionIndex).trim()
+      : '';
     return [
-      `## 1. ${title}`,
+      ...(originalPreamble ? [originalPreamble, ''] : ['# Child Slice Plan', '']),
+      '<!-- This source change is a planning container. Implementation tasks live in its child changes. -->',
       '',
-      '- [ ] 1.1 Replace this scaffold with the implementation tasks for this slice',
-      '',
+      ...children.flatMap((child, index) => [
+        `## ${index + 1}. ${child.title}`,
+        '',
+        `- [ ] ${index + 1}.1 Track completion of child change \`${child.id}\``,
+        '',
+      ]),
     ].join('\n');
+  }
+
+  private async replaceFileAtomically(filePath: string, content: string): Promise<void> {
+    const temporaryPath = `${filePath}.split-${process.pid}-${randomUUID()}.tmp`;
+    const sourceMode = (await fs.stat(filePath)).mode;
+    try {
+      await fs.writeFile(temporaryPath, content, {
+        encoding: 'utf-8',
+        flag: 'wx',
+        mode: sourceMode,
+      });
+      await fs.rename(temporaryPath, filePath);
+    } catch (error) {
+      try {
+        await fs.unlink(temporaryPath);
+      } catch (cleanupError) {
+        if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw new AggregateError(
+            [error, cleanupError],
+            `Failed to replace ${filePath} and remove its temporary split file.`
+          );
+        }
+      }
+      throw error;
+    }
   }
 
   private getGraphIssues(analysis: ActiveChangeValidationAnalysis): ValidationIssue[] {
