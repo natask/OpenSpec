@@ -213,6 +213,85 @@ Packaging a change as a folder has several benefits:
 
 4. **Review-friendly.** A change folder is easy to review — open it, read the proposal, check the design, see the spec deltas.
 
+## Change stacks
+
+A change stack records the order between active changes. Store the order in each
+change's `.openspec.yaml` file. The metadata is optional. Changes without stack
+metadata keep their current behavior.
+
+### Stack metadata
+
+```yaml
+schema: spec-driven
+created: 2026-08-09
+dependsOn:
+  - add-user-model
+provides:
+  - authenticated-session
+requires:
+  - user-record
+touches:
+  - auth
+parent: modernize-auth
+```
+
+Each field has one role:
+
+| Field | Meaning |
+|-------|---------|
+| `dependsOn` | Lists changes that must come before this change. This field defines the dependency graph. |
+| `provides` | Names capability markers that this change supplies. |
+| `requires` | Names capability markers that this change needs. It does not add a dependency edge. |
+| `touches` | Names areas that this change may affect. Shared values produce warnings. |
+| `parent` | Links a child slice to its source planning change. It does not add a dependency edge. |
+
+Use change IDs in `dependsOn` and `parent`. Use short, stable names for capability
+markers and touched areas. OpenSpec validates the field shapes when it reads the
+metadata.
+
+### Dependency rules
+
+`dependsOn` is the only field that sets order. Add an edge even when a
+`provides` and `requires` pair describes the same relationship. OpenSpec does
+not infer edges from capability markers, touched areas, or parent links.
+
+An active dependency blocks its dependent change. An archived dependency counts
+as resolved. A missing dependency or a dependency cycle blocks graph and next
+change calculations until you fix the metadata.
+
+OpenSpec orders ready changes by dependency depth. It sorts change IDs
+lexicographically when changes have the same depth. The same metadata therefore
+produces the same order on each run.
+
+### Sequencing workflow
+
+Use this loop when active changes must land in order:
+
+1. Add `dependsOn` entries to each dependent change.
+2. Run `openspec change graph` to inspect the full order and its validation signals.
+3. Run `openspec change next` to list active changes whose dependencies are resolved.
+4. Finish and archive a ready change, then repeat the checks for the remaining changes.
+
+Keep capability markers separate from order. `provides` and `requires` describe
+the contract between changes. `dependsOn` tells OpenSpec which change comes
+first.
+
+### Validation signals
+
+OpenSpec treats these conditions as blockers:
+
+- `dependsOn` names a change that is neither active nor archived.
+- Active changes form a dependency cycle.
+- A change reaches a missing target or cycle through another dependency.
+
+OpenSpec reports these conditions as warnings:
+
+- Active changes share a `touches` value.
+- A `requires` marker has no provider in active or archived history.
+
+Warnings do not add edges or change the recommended order. Fix them when they
+show missing coordination or incomplete metadata.
+
 ## Artifacts
 
 Artifacts are the documents within a change that guide the work.
