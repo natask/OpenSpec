@@ -36,4 +36,4 @@
 ## 6. Verification
 
 - [x] 6.1 Run targeted tests for change parsing, validation, and CLI commands
-- [ ] 6.2 Run full test suite (`pnpm test`) and resolve regressions
+- [x] 6.2 Run full test suite (`pnpm test`) and resolve regressions
