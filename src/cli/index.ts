@@ -294,10 +294,14 @@ changeCmd
 changeCmd
   .command('split <change-id>')
   .description('Scaffold child changes from top-level task sections')
-  .action(async (changeId: string) => {
+  .option('--overwrite', 'Regenerate managed files for source-owned child changes')
+  .option('--force', 'Alias for --overwrite')
+  .action(async (changeId: string, options: { overwrite?: boolean; force?: boolean }) => {
     try {
       const changeCommand = new ChangeCommand();
-      await changeCommand.split(changeId);
+      await changeCommand.split(changeId, {
+        overwrite: options.overwrite === true || options.force === true,
+      });
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;

@@ -24,7 +24,7 @@
 - [x] 4.2 Ensure generated children include parent/dependency metadata and stub proposal/tasks files
 - [x] 4.3 Convert the source change into a parent planning container as part of split (no duplicate child implementation tasks)
 - [x] 4.4 Add tests for split output structure, source-change parent conversion, and deterministic re-split error behavior when overwrite mode is not requested
-- [ ] 4.5 Implement and test explicit overwrite mode for `openspec change split` (`--overwrite` / `--force`) for controlled re-splitting
+- [x] 4.5 Implement and test explicit overwrite mode for `openspec change split` (`--overwrite` / `--force`) for controlled re-splitting
 
 ## 5. Documentation
 

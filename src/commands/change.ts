@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { randomUUID } from 'node:crypto';
+import * as yaml from 'yaml';
 import { JsonConverter } from '../core/converters/json-converter.js';
 import { Validator } from '../core/validation/validator.js';
 import { ChangeParser } from '../core/parsers/change-parser.js';
@@ -8,7 +9,8 @@ import { Change } from '../core/schemas/index.js';
 import { isInteractive } from '../utils/interactive.js';
 import { getActiveChangeIds } from '../utils/item-discovery.js';
 import { createChange, validateChangeName } from '../utils/change-utils.js';
-import { readChangeMetadata } from '../utils/change-metadata.js';
+import { readChangeMetadata, resolveSchemaForChange } from '../utils/change-metadata.js';
+import { ChangeMetadataSchema, type ChangeMetadata } from '../core/artifact-graph/types.js';
 import {
   analyzeActiveChangeDependencies,
   formatBlockedDependency,
@@ -28,10 +30,29 @@ interface SplitChild {
   tasksContent: string;
 }
 
+export interface SplitOptions {
+  overwrite?: boolean;
+}
+
+interface ExistingSplitChild {
+  exists: boolean;
+  metadata?: ChangeMetadata;
+}
+
+interface ManagedFileSnapshot {
+  filePath: string;
+  existed: boolean;
+  content?: Buffer;
+  mode?: number;
+}
+
 // Constants for better maintainability
 const ARCHIVE_DIR = 'archive';
 const TASK_PATTERN = /^[-*]\s+\[[\sx]\]/i;
 const COMPLETED_TASK_PATTERN = /^[-*]\s+\[x\]/i;
+const PARENT_PLAN_MARKER =
+  '<!-- This source change is a planning container. Implementation tasks live in its child changes. -->';
+const MANAGED_SPLIT_FILES = ['.openspec.yaml', 'proposal.md', 'tasks.md'] as const;
 
 export class ChangeCommand {
   private converter: JsonConverter;
@@ -301,7 +322,7 @@ export class ChangeCommand {
     });
   }
 
-  async split(changeName: string): Promise<void> {
+  async split(changeName: string, options: SplitOptions = {}): Promise<void> {
     const nameValidation = validateChangeName(changeName);
     if (!nameValidation.valid) {
       throw new Error(nameValidation.error);
@@ -343,47 +364,108 @@ export class ChangeCommand {
       );
     }
 
+    const existingChildren = new Map<string, ExistingSplitChild>();
     for (const childId of childIds) {
+      const childDir = path.join(changesPath, childId);
       try {
-        await fs.access(path.join(changesPath, childId));
-        throw new Error(
-          `Cannot split change "${changeName}": child change "${childId}" already exists.`
-        );
+        const childStats = await fs.lstat(childDir);
+        if (!options.overwrite) {
+          throw new Error(
+            `Cannot split change "${changeName}": child change "${childId}" already exists.`
+          );
+        }
+        if (childStats.isSymbolicLink() || !childStats.isDirectory()) {
+          throw new Error(
+            `Cannot overwrite child change "${childId}": expected a real directory owned by "${changeName}".`
+          );
+        }
+        for (const managedName of MANAGED_SPLIT_FILES) {
+          const managedPath = path.join(childDir, managedName);
+          try {
+            const managedStats = await fs.lstat(managedPath);
+            if (managedStats.isSymbolicLink() || !managedStats.isFile()) {
+              throw new Error(
+                `Cannot overwrite child change "${childId}": managed path "${managedName}" is not a regular file.`
+              );
+            }
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          }
+        }
+        const metadata = readChangeMetadata(childDir, projectRoot);
+        if (metadata?.parent !== changeName) {
+          throw new Error(
+            `Cannot overwrite child change "${childId}": metadata does not bind it to parent "${changeName}".`
+          );
+        }
+        existingChildren.set(childId, { exists: true, metadata });
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        existingChildren.set(childId, { exists: false });
       }
     }
 
     const sourceMetadata = readChangeMetadata(sourceDir, projectRoot);
+    const sourceSchema = resolveSchemaForChange(sourceDir);
+    const sourceIsParentPlan = this.isParentPlanningTasks(tasksContent, children);
     const createdChildDirs: string[] = [];
+    const managedSnapshots = options.overwrite
+      ? await this.captureManagedSnapshots(
+        children
+          .filter(child => existingChildren.get(child.id)?.exists)
+          .flatMap(child => MANAGED_SPLIT_FILES.map(
+            managedName => path.join(changesPath, child.id, managedName)
+          ))
+      )
+      : [];
     try {
       for (const [index, child] of children.entries()) {
         const predecessorId = index === 0 ? changeName : children[index - 1].id;
-        await createChange(projectRoot, child.id, {
-          schema: sourceMetadata?.schema,
-          metadata: {
-            parent: changeName,
-            dependsOn: [predecessorId],
-          },
-        });
         const childDir = path.join(changesPath, child.id);
-        createdChildDirs.push(childDir);
-        await fs.writeFile(
-          path.join(childDir, 'proposal.md'),
-          this.getSplitProposalStub(changeName, child.title),
-          'utf-8'
+        const existingChild = existingChildren.get(child.id);
+        if (!existingChild?.exists) {
+          await createChange(projectRoot, child.id, {
+            schema: sourceMetadata?.schema,
+            metadata: {
+              parent: changeName,
+              dependsOn: [predecessorId],
+            },
+          });
+          createdChildDirs.push(childDir);
+        }
+        const created = existingChild?.metadata?.created
+          ?? readChangeMetadata(childDir, projectRoot)?.created;
+        const regeneratedMetadata = ChangeMetadataSchema.parse({
+          schema: sourceSchema,
+          ...(created ? { created } : {}),
+          dependsOn: [predecessorId],
+          parent: changeName,
+        });
+        await this.replaceFileAtomically(
+          path.join(childDir, '.openspec.yaml'),
+          yaml.stringify(regeneratedMetadata)
         );
-        await fs.writeFile(path.join(childDir, 'tasks.md'), child.tasksContent, 'utf-8');
+        await this.replaceFileAtomically(
+          path.join(childDir, 'proposal.md'),
+          this.getSplitProposalStub(changeName, child.title)
+        );
+        await this.replaceFileAtomically(
+          path.join(childDir, 'tasks.md'),
+          sourceIsParentPlan ? this.getSplitTasksStub(child.title) : child.tasksContent
+        );
       }
 
-      await this.replaceFileAtomically(
-        tasksPath,
-        this.getParentPlanningTasks(children, tasksContent)
-      );
+      if (!sourceIsParentPlan) {
+        await this.replaceFileAtomically(
+          tasksPath,
+          this.getParentPlanningTasks(children, tasksContent)
+        );
+      }
     } catch (error) {
-      const rollbackResults = await Promise.allSettled(
-        createdChildDirs.map(childDir => fs.rm(childDir, { recursive: true, force: true }))
-      );
+      const rollbackResults = await Promise.allSettled([
+        ...managedSnapshots.map(snapshot => this.restoreManagedSnapshot(snapshot)),
+        ...createdChildDirs.map(childDir => fs.rm(childDir, { recursive: true, force: true })),
+      ]);
       const rollbackFailures = rollbackResults
         .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
         .map(result => result.reason);
@@ -396,7 +478,8 @@ export class ChangeCommand {
       throw error;
     }
 
-    console.log(`Scaffolded ${childIds.length} child changes from "${changeName}":`);
+    const action = options.overwrite ? 'Regenerated' : 'Scaffolded';
+    console.log(`${action} ${childIds.length} child changes from "${changeName}":`);
     childIds.forEach(childId => console.log(`- ${childId}`));
   }
 
@@ -497,7 +580,7 @@ export class ChangeCommand {
       : '';
     return [
       ...(originalPreamble ? [originalPreamble, ''] : ['# Child Slice Plan', '']),
-      '<!-- This source change is a planning container. Implementation tasks live in its child changes. -->',
+      PARENT_PLAN_MARKER,
       '',
       ...children.flatMap((child, index) => [
         `## ${index + 1}. ${child.title}`,
@@ -508,9 +591,77 @@ export class ChangeCommand {
     ].join('\n');
   }
 
-  private async replaceFileAtomically(filePath: string, content: string): Promise<void> {
+  private getSplitTasksStub(title: string): string {
+    return [
+      `## 1. ${title}`,
+      '',
+      '- [ ] 1.1 Replace this scaffold with the implementation tasks for this slice',
+      '',
+    ].join('\n');
+  }
+
+  private isParentPlanningTasks(
+    tasksContent: string,
+    children: readonly SplitChild[]
+  ): boolean {
+    return tasksContent.includes(PARENT_PLAN_MARKER)
+      && children.every(child => child.tasksContent.includes(
+        `Track completion of child change \`${child.id}\``
+      ));
+  }
+
+  private async captureManagedSnapshots(
+    filePaths: readonly string[]
+  ): Promise<ManagedFileSnapshot[]> {
+    return Promise.all(filePaths.map(async filePath => {
+      try {
+        const stats = await fs.stat(filePath);
+        return {
+          filePath,
+          existed: true,
+          content: await fs.readFile(filePath),
+          mode: stats.mode,
+        };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          return { filePath, existed: false };
+        }
+        throw error;
+      }
+    }));
+  }
+
+  private async restoreManagedSnapshot(snapshot: ManagedFileSnapshot): Promise<void> {
+    if (snapshot.existed) {
+      await this.replaceFileAtomically(
+        snapshot.filePath,
+        snapshot.content!,
+        snapshot.mode
+      );
+      return;
+    }
+    try {
+      await fs.unlink(snapshot.filePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+
+  private async replaceFileAtomically(
+    filePath: string,
+    content: string | Uint8Array,
+    mode?: number
+  ): Promise<void> {
     const temporaryPath = `${filePath}.split-${process.pid}-${randomUUID()}.tmp`;
-    const sourceMode = (await fs.stat(filePath)).mode;
+    let sourceMode = mode;
+    if (sourceMode === undefined) {
+      try {
+        sourceMode = (await fs.stat(filePath)).mode;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        sourceMode = 0o666;
+      }
+    }
     try {
       await fs.writeFile(temporaryPath, content, {
         encoding: 'utf-8',

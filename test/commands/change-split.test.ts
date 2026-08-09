@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChangeCommand } from '../../src/commands/change.js';
 import { createChange } from '../../src/utils/change-utils.js';
-import { readChangeMetadata } from '../../src/utils/change-metadata.js';
+import { readChangeMetadata, writeChangeMetadata } from '../../src/utils/change-metadata.js';
+import { runCLI } from '../helpers/run-cli.js';
 
 describe('change split', () => {
   const originalCwd = process.cwd();
@@ -164,7 +165,121 @@ describe('change split', () => {
     expect(await fs.readFile(sourceTasksPath, 'utf-8')).toBe(originalTasks);
     expect((await fs.readdir(sourceDir)).some(name => name.includes('.split-'))).toBe(false);
   });
+
+  it('regenerates only managed files with either explicit overwrite flag', async () => {
+    await new ChangeCommand().split('large-change');
+    const childDir = path.join(
+      testDir,
+      'openspec',
+      'changes',
+      'large-change-storage-layer'
+    );
+    const childProposal = path.join(childDir, 'proposal.md');
+    const childTasks = path.join(childDir, 'tasks.md');
+    const childMetadata = path.join(childDir, '.openspec.yaml');
+    const extraFile = path.join(childDir, 'implementation-notes.md');
+    const parentTasksBefore = await fs.readFile(path.join(sourceDir, 'tasks.md'), 'utf-8');
+    await fs.writeFile(childProposal, 'user proposal\n', 'utf-8');
+    await fs.writeFile(childTasks, 'user tasks\n', 'utf-8');
+    await fs.writeFile(extraFile, 'preserve me\n', 'utf-8');
+    writeChangeMetadata(childDir, {
+      schema: 'spec-driven',
+      created: '2026-08-09',
+      parent: 'large-change',
+      dependsOn: ['drifted-dependency'],
+    }, testDir);
+
+    const overwriteResult = await runCLI(
+      ['change', 'split', 'large-change', '--overwrite'],
+      { cwd: testDir }
+    );
+
+    expect(overwriteResult.exitCode).toBe(0);
+    expect(await fs.readFile(childProposal, 'utf-8')).toContain('# Change: Storage Layer');
+    expect(await fs.readFile(childTasks, 'utf-8')).toContain(
+      'Replace this scaffold with the implementation tasks for this slice'
+    );
+    expect(await fs.readFile(extraFile, 'utf-8')).toBe('preserve me\n');
+    expect(readChangeMetadata(childDir, testDir)).toMatchObject({
+      created: '2026-08-09',
+      parent: 'large-change',
+      dependsOn: ['large-change'],
+    });
+    expect(await fs.readFile(path.join(sourceDir, 'tasks.md'), 'utf-8'))
+      .toBe(parentTasksBefore);
+
+    await fs.writeFile(childProposal, 'second user proposal\n', 'utf-8');
+    const forceResult = await runCLI(
+      ['change', 'split', 'large-change', '--force'],
+      { cwd: testDir }
+    );
+    expect(forceResult.exitCode).toBe(0);
+    expect(await fs.readFile(childProposal, 'utf-8')).toContain('# Change: Storage Layer');
+    expect(await fs.readFile(childProposal, 'utf-8')).not.toContain('second user proposal');
+    expect(await fs.readFile(childMetadata, 'utf-8')).toContain('parent: large-change');
+  });
+
+  it('refuses to overwrite a colliding change not owned by the source', async () => {
+    await createChange(testDir, 'large-change-storage-layer', {
+      metadata: {
+        parent: 'different-parent',
+        dependsOn: ['different-parent'],
+      },
+    });
+    const foreignDir = path.join(
+      testDir,
+      'openspec',
+      'changes',
+      'large-change-storage-layer'
+    );
+    const foreignMetadataBefore = await fs.readFile(
+      path.join(foreignDir, '.openspec.yaml'),
+      'utf-8'
+    );
+
+    await expect(new ChangeCommand().split('large-change', { overwrite: true }))
+      .rejects.toThrow(
+        'Cannot overwrite child change "large-change-storage-layer": metadata does not bind it to parent "large-change".'
+      );
+
+    expect(await fs.readFile(path.join(foreignDir, '.openspec.yaml'), 'utf-8'))
+      .toBe(foreignMetadataBefore);
+    expect(await fs.readFile(path.join(sourceDir, 'tasks.md'), 'utf-8')).toBe(originalTasks);
+    await expect(fs.access(path.join(
+      testDir,
+      'openspec',
+      'changes',
+      'large-change-http-api'
+    ))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('restores all managed user content when overwrite regeneration fails', async () => {
+    const command = new ChangeCommand();
+    await command.split('large-change');
+    const childDir = path.join(
+      testDir,
+      'openspec',
+      'changes',
+      'large-change-storage-layer'
+    );
+    const managedPaths = MANAGED_FILES.map(name => path.join(childDir, name));
+    await fs.writeFile(managedPaths[1], 'user proposal before failure\n', 'utf-8');
+    await fs.writeFile(managedPaths[2], 'user tasks before failure\n', 'utf-8');
+    const before = await Promise.all(managedPaths.map(filePath => fs.readFile(filePath)));
+    vi.spyOn(fs, 'rename').mockRejectedValueOnce(
+      Object.assign(new Error('forced overwrite failure'), { code: 'EIO' })
+    );
+
+    await expect(command.split('large-change', { overwrite: true }))
+      .rejects.toThrow('forced overwrite failure');
+
+    const after = await Promise.all(managedPaths.map(filePath => fs.readFile(filePath)));
+    expect(after).toEqual(before);
+    expect((await fs.readdir(childDir)).some(name => name.includes('.split-'))).toBe(false);
+  });
 });
+
+const MANAGED_FILES = ['.openspec.yaml', 'proposal.md', 'tasks.md'] as const;
 
 async function captureError(operation: () => Promise<void>): Promise<string> {
   try {

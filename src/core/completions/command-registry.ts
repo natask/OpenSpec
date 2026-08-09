@@ -217,7 +217,16 @@ export const COMMAND_REGISTRY: CommandDefinition[] = [
         description: 'Scaffold child changes from top-level task sections',
         acceptsPositional: true,
         positionalType: 'change-id',
-        flags: [],
+        flags: [
+          {
+            name: 'overwrite',
+            description: 'Regenerate managed files for source-owned child changes',
+          },
+          {
+            name: 'force',
+            description: 'Alias for --overwrite',
+          },
+        ],
       },
     ],
   },
