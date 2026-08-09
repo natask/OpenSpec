@@ -21,6 +21,11 @@ import {
 } from '../core/validation/change-dependencies.js';
 import type { ValidationIssue } from '../core/validation/types.js';
 
+interface SplitChild {
+  id: string;
+  title: string;
+}
+
 // Constants for better maintainability
 const ARCHIVE_DIR = 'archive';
 const TASK_PATTERN = /^[-*]\s+\[[\sx]\]/i;
@@ -321,13 +326,14 @@ export class ChangeCommand {
       );
     }
 
-    const childIds = this.getSplitChildIds(changeName, tasksContent);
-    if (childIds.length === 0) {
+    const children = this.getSplitChildren(changeName, tasksContent);
+    if (children.length === 0) {
       throw new Error(
         `Change "${changeName}" has no level-two task sections to scaffold as child slices.`
       );
     }
 
+    const childIds = children.map(child => child.id);
     const duplicateId = childIds.find((childId, index) => childIds.indexOf(childId) !== index);
     if (duplicateId) {
       throw new Error(
@@ -347,8 +353,25 @@ export class ChangeCommand {
     }
 
     const sourceMetadata = readChangeMetadata(sourceDir, projectRoot);
-    for (const childId of childIds) {
-      await createChange(projectRoot, childId, { schema: sourceMetadata?.schema });
+    for (const [index, child] of children.entries()) {
+      const predecessorId = index === 0 ? changeName : children[index - 1].id;
+      await createChange(projectRoot, child.id, {
+        schema: sourceMetadata?.schema,
+        metadata: {
+          parent: changeName,
+          dependsOn: [predecessorId],
+        },
+      });
+      await fs.writeFile(
+        path.join(changesPath, child.id, 'proposal.md'),
+        this.getSplitProposalStub(changeName, child.title),
+        'utf-8'
+      );
+      await fs.writeFile(
+        path.join(changesPath, child.id, 'tasks.md'),
+        this.getSplitTasksStub(child.title),
+        'utf-8'
+      );
     }
 
     console.log(`Scaffolded ${childIds.length} child changes from "${changeName}":`);
@@ -397,15 +420,50 @@ export class ChangeCommand {
     return { total, completed };
   }
 
-  private getSplitChildIds(changeName: string, tasksContent: string): string[] {
+  private getSplitChildren(changeName: string, tasksContent: string): SplitChild[] {
     return [...tasksContent.matchAll(/^##\s+(?:\d+(?:\.\d+)*[.)]?\s+)?(.+?)\s*$/gm)]
-      .map(([, title]) => title
-        .normalize('NFKD')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, ''))
-      .filter(slug => slug.length > 0)
-      .map(slug => `${changeName}-${slug}`);
+      .map(([, title]) => ({
+        title: title.trim(),
+        slug: title
+          .normalize('NFKD')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, ''),
+      }))
+      .filter(child => child.slug.length > 0)
+      .map(child => ({ id: `${changeName}-${child.slug}`, title: child.title }));
+  }
+
+  private getSplitProposalStub(parentId: string, title: string): string {
+    return [
+      `# Change: ${title}`,
+      '',
+      '## Why',
+      '',
+      `<!-- Explain why this child slice of \`${parentId}\` should be implemented. -->`,
+      '',
+      '## What Changes',
+      '',
+      '<!-- Describe the bounded behavior delivered by this child slice. -->',
+      '',
+      '## Capabilities',
+      '',
+      '<!-- List new or modified capabilities and add their delta specs. -->',
+      '',
+      '## Impact',
+      '',
+      '<!-- List affected code, APIs, dependencies, and systems. -->',
+      '',
+    ].join('\n');
+  }
+
+  private getSplitTasksStub(title: string): string {
+    return [
+      `## 1. ${title}`,
+      '',
+      '- [ ] 1.1 Replace this scaffold with the implementation tasks for this slice',
+      '',
+    ].join('\n');
   }
 
   private getGraphIssues(analysis: ActiveChangeValidationAnalysis): ValidationIssue[] {

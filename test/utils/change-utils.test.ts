@@ -145,6 +145,39 @@ describe('createChange', () => {
       const content = await fs.readFile(metaPath, 'utf-8');
       expect(content).toContain('schema: spec-driven');
     });
+
+    it('should persist validated stack metadata for a new change', async () => {
+      await createChange(testDir, 'add-auth-session', {
+        metadata: {
+          parent: 'modernize-auth',
+          dependsOn: ['modernize-auth'],
+        },
+      });
+
+      const metaPath = path.join(
+        testDir,
+        'openspec',
+        'changes',
+        'add-auth-session',
+        '.openspec.yaml'
+      );
+      const content = await fs.readFile(metaPath, 'utf-8');
+      expect(content).toContain('parent: modernize-auth');
+      expect(content).toContain('dependsOn:\n  - modernize-auth');
+    });
+
+    it('should reject invalid stack metadata before creating the directory', async () => {
+      await expect(createChange(testDir, 'invalid-stack', {
+        metadata: { dependsOn: [''] },
+      })).rejects.toThrow();
+
+      await expect(fs.access(path.join(
+        testDir,
+        'openspec',
+        'changes',
+        'invalid-stack'
+      ))).rejects.toMatchObject({ code: 'ENOENT' });
+    });
   });
 
   describe('schema validation', () => {

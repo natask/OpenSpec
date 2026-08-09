@@ -2,6 +2,7 @@ import path from 'path';
 import { FileSystemUtils } from './file-system.js';
 import { writeChangeMetadata, validateSchemaName } from './change-metadata.js';
 import { readProjectConfig } from '../core/project-config.js';
+import { ChangeMetadataSchema, type ChangeMetadata } from '../core/artifact-graph/types.js';
 
 const DEFAULT_SCHEMA = 'spec-driven';
 
@@ -11,6 +12,11 @@ const DEFAULT_SCHEMA = 'spec-driven';
 export interface CreateChangeOptions {
   /** The workflow schema to use (default: 'spec-driven') */
   schema?: string;
+  /** Optional stack metadata persisted with the new change scaffold. */
+  metadata?: Partial<Pick<
+    ChangeMetadata,
+    'dependsOn' | 'provides' | 'requires' | 'touches' | 'parent'
+  >>;
 }
 
 /**
@@ -138,6 +144,14 @@ export async function createChange(
   // Validate the resolved schema
   validateSchemaName(schemaName, projectRoot);
 
+  const today = new Date().toISOString().split('T')[0];
+  const metadata = {
+    ...options.metadata,
+    schema: schemaName,
+    created: today,
+  };
+  ChangeMetadataSchema.parse(metadata);
+
   // Build the change directory path
   const changeDir = path.join(projectRoot, 'openspec', 'changes', name);
 
@@ -149,12 +163,8 @@ export async function createChange(
   // Create the directory (including parent directories if needed)
   await FileSystemUtils.createDirectory(changeDir);
 
-  // Write metadata file with schema and creation date
-  const today = new Date().toISOString().split('T')[0];
-  writeChangeMetadata(changeDir, {
-    schema: schemaName,
-    created: today,
-  }, projectRoot);
+  // Write metadata file with schema, creation date, and optional stack fields.
+  writeChangeMetadata(changeDir, metadata, projectRoot);
 
   return { schema: schemaName };
 }
