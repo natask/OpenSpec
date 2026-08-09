@@ -292,6 +292,105 @@ OpenSpec reports these conditions as warnings:
 Warnings do not add edges or change the recommended order. Fix them when they
 show missing coordination or incomplete metadata.
 
+### Split a large change
+
+Split a change when each part can finish after a clear set of prerequisites.
+Keep one change when its tasks must land together.
+
+Before you split, make each level-two section in `tasks.md` one child slice:
+
+```markdown
+## 1. Data contract
+
+- [ ] 1.1 Define the stored record
+- [ ] 1.2 Test record compatibility
+
+## 2. HTTP API
+
+- [ ] 2.1 Add the endpoint
+
+## 3. Client UI
+
+- [ ] 3.1 Use the endpoint
+```
+
+Run `openspec change split <change-id>`. OpenSpec moves each section into one
+child change. It replaces the source tasks with a plan that tracks those
+children. The source proposal, metadata, and task preamble stay in place.
+
+The generated order is linear:
+
+```text
+source change
+  -> source-change-data-contract
+  -> source-change-http-api
+  -> source-change-client-ui
+```
+
+The first child depends on the source. Each later child depends on the child
+before it. Review the source as a planning container, then archive it before you
+start the first child. The source tracking tasks describe the child plan. They
+do not duplicate the implementation tasks in those children.
+
+### Make each child mergeable
+
+A child is mergeable when it can be reviewed and archived after its declared
+dependencies. Check each child for these properties:
+
+- State one bounded outcome in its proposal.
+- Keep only that outcome's implementation tasks in its task file.
+- Add the delta specs needed for that outcome.
+- Include the checks that prove the outcome works.
+- List every real prerequisite in `dependsOn`.
+
+Do not rely on child order alone. The order in `dependsOn` must match the code
+and behavior contracts. Use `provides` and `requires` to name those contracts,
+then add the explicit dependency edge.
+
+### Adjust the generated order
+
+Review the generated metadata before implementation. Keep the linear chain when
+each child uses the child before it.
+
+If two children only need the source, point both at the source:
+
+```yaml
+# source-change-storage/.openspec.yaml
+schema: spec-driven
+parent: source-change
+dependsOn:
+  - source-change
+```
+
+```yaml
+# source-change-audit-log/.openspec.yaml
+schema: spec-driven
+parent: source-change
+dependsOn:
+  - source-change
+```
+
+If one child needs several predecessors, list each predecessor:
+
+```yaml
+# source-change-client-ui/.openspec.yaml
+schema: spec-driven
+parent: source-change
+dependsOn:
+  - source-change-http-api
+  - source-change-access-policy
+```
+
+Run `openspec change graph` after each metadata edit. Run
+`openspec change next` before you start another child. Shared `touches` warnings
+show where child ownership may still overlap.
+
+The split command protects filled child artifacts on repeat runs. A repeat
+without an overwrite flag stops before it writes. `--overwrite` and `--force`
+replace child metadata, proposals, and tasks. Use either flag only when you want
+to reset those managed files. See the [CLI reference](cli.md#openspec-change-split)
+for the overwrite checks.
+
 ## Artifacts
 
 Artifacts are the documents within a change that guide the work.
