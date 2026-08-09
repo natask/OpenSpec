@@ -7,6 +7,8 @@ import {
   findDependencyCycles,
   findUnmatchedRequirements,
   formatDependencyCycle,
+  getDependencyOrder,
+  getUnblockedChanges,
 } from '../../src/core/validation/change-dependencies.js';
 import { Validator } from '../../src/core/validation/validator.js';
 
@@ -124,6 +126,49 @@ describe('change dependency cycle detection', () => {
       ['alpha', ['missing-alpha', 'missing-zeta']],
       ['charlie', ['missing-charlie']],
     ]);
+  });
+
+  it('orders every dependency depth before its dependents', () => {
+    const graph = new Map<string, readonly string[]>([
+      ['foxtrot', ['charlie']],
+      ['echo', ['delta', 'charlie']],
+      ['delta', ['bravo']],
+      ['charlie', ['alpha']],
+      ['bravo', []],
+      ['alpha', []],
+    ]);
+
+    expect(getDependencyOrder(graph)).toEqual([
+      'alpha',
+      'bravo',
+      'charlie',
+      'delta',
+      'echo',
+      'foxtrot',
+    ]);
+  });
+
+  it('breaks equal-depth ties lexicographically regardless of input order', () => {
+    const forwardGraph = new Map<string, readonly string[]>([
+      ['alpha', []],
+      ['bravo', []],
+      ['charlie', ['alpha']],
+      ['delta', ['bravo']],
+      ['echo', ['delta', 'charlie']],
+      ['foxtrot', ['charlie']],
+    ]);
+    const reversedGraph = new Map([...forwardGraph.entries()].reverse().map(
+      ([changeId, dependencies]) => [changeId, [...dependencies].reverse()] as const
+    ));
+    const expected = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot'];
+
+    expect(getDependencyOrder(forwardGraph)).toEqual(expected);
+    expect(getDependencyOrder(reversedGraph)).toEqual(expected);
+    expect(getUnblockedChanges(new Map([
+      ['root', []],
+      ['current', ['archived-change']],
+      ['blocked', ['root']],
+    ]))).toEqual(['current', 'root']);
   });
 });
 

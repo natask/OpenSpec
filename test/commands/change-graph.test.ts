@@ -23,8 +23,11 @@ describe('change sequencing commands', () => {
     await writeChange('alpha');
 
     const result = await runCLI(['change', 'graph'], { cwd: testDir });
+    const repeatedResult = await runCLI(['change', 'graph'], { cwd: testDir });
 
     expect(result.exitCode).toBe(0);
+    expect(repeatedResult.exitCode).toBe(0);
+    expect(repeatedResult.stdout).toBe(result.stdout);
     expect(result.stdout.trim()).toBe([
       'Recommended dependency order:',
       '1. alpha',
@@ -76,8 +79,11 @@ describe('change sequencing commands', () => {
     await fs.writeFile(path.join(archivedDir, 'proposal.md'), '# completed-change\n');
 
     const result = await runCLI(['change', 'next'], { cwd: testDir });
+    const repeatedResult = await runCLI(['change', 'next'], { cwd: testDir });
 
     expect(result.exitCode).toBe(0);
+    expect(repeatedResult.exitCode).toBe(0);
+    expect(repeatedResult.stdout).toBe(result.stdout);
     expect(result.stdout.trim()).toBe([
       'Recommended next changes:',
       '1. alpha',
